@@ -115,7 +115,9 @@ jobs:
             gradle assembleDebug
           fi
           echo "================ APK SIGNATURE ================"
-          keytool -printcert -jarfile app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA1:|SHA256:"
+          APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "Fil: $APK_FILE"
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -n 1)/apksigner verify --print-certs "$APK_FILE" | grep -E "SHA-1|SHA-256"
           echo "==============================================="
 
       - name: Resolve release tag
