@@ -90,9 +90,12 @@ jobs:
             echo ""
             echo "========================================================================="
           fi
-          echo "================ SHA-1 FINGERPRINT ================"
-          keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep "SHA1:"
-          echo "==================================================="
+          mkdir -p ~/.android app
+          cp debug.keystore ~/.android/debug.keystore
+          cp debug.keystore app/debug.keystore
+          echo "================ FINGERPRINTS ================"
+          keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
+          echo "=============================================="
 
       - name: Build Debug APK
         run: |
