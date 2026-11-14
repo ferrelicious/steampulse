@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "WatchlistItem": {
+      "title": "WatchlistItem",
+      "description": "A user's saved Steam game with a target price alert threshold.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase user UID owning this watchlist entry."
+        },
+        "gameTitle": {
+          "type": "string",
+          "description": "Display title of the watched Steam game."
+        },
+        "targetPriceEur": {
+          "type": "number",
+          "description": "Target price threshold in EUR for price alerts."
+        },
+        "preferredCurrency": {
+          "type": "string",
+          "enum": ["SEK", "EUR"],
+          "description": "Currency selected when setting the target price."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when last updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "gameTitle", "targetPriceEur", "preferredCurrency", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/watchlist/{gameId}": {
+      "schema": { "$ref": "#/entities/WatchlistItem" },
+      "description": "User-scoped watchlist and target price alerts keyed by gameId."
+    }
+  }
+}

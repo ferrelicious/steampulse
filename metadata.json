@@ -1,0 +1,6 @@
+{
+  "name": "SteamPulse",
+  "description": "Live Steam-spelarstatistik, prisjämförelse, AI-spelrådgivare och 1K/2K/4K-bildstudio",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

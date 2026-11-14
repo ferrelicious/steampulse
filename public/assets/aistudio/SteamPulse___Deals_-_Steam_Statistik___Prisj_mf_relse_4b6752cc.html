@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="sv" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SteamPulse & Deals | Live Spelarstatistik & Bästa Priser</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        steam: {
+                            bg: '#0b101b',
+                            surface: '#131b2e',
+                            card: '#182238',
+                            hover: '#1f2c47',
+                            border: '#283756',
+                            accent: '#00e5ff',
+                            neon: '#10b981',
+                            sale: '#a3e635'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0b101b;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0b101b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #283756;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00e5ff;
+        }
+        /* Pulsating Live Dot */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.8; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+        .live-dot::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background-color: #10b981;
+            animation: pulse-ring 1.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        /* Subtle glowing border on hover */
+        .game-row-glow:hover {
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.08);
+            border-color: rgba(0, 229, 255, 0.35);
+        }
+        .glass-header {
+            background: rgba(11, 16, 27, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col selection:bg-cyan-500 selection:text-slate-950">
+
+    <!-- Top Navigation & Platform Stats -->
+    <header class="sticky top-0 z-40 glass-header border-b border-steam-border">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex flex-wrap items-center justify-between py-3.5 gap-4">
+                <!-- Brand Logo -->
+                <div class="flex items-center gap-3 cursor-pointer" onclick="resetFilters()">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-emerald-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                        <i data-lucide="activity" class="w-6 h-6 text-slate-950 stroke-[2.5]"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-extrabold text-xl tracking-tight text-white">SteamPulse</span>
+                            <span class="text-xs font-bold px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">& DEALS</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 hidden sm:block">Live spelarstatistik & prisjämförelse 2026</p>
+                    </div>
+                </div>
+
+                <!-- Global Platform Telemetry -->
+                <div class="hidden lg:flex items-center gap-6 bg-steam-surface/90 px-4 py-2 rounded-xl border border-steam-border">
+                    <div class="flex items-center gap-2.5">
+                        <span class="relative flex h-2.5 w-2.5 live-dot">
+                            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+                        </span>
+                        <div>
+                            <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Steam Online Nu</div>
+                            <div id="global-online" class="font-mono text-sm font-bold text-white">37,842,190</div>
+                        </div>
+                    </div>
+                    <div class="h-6 w-px bg-steam-border"></div>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">I Spel Just Nu</div>
+                        <div id="global-ingame" class="font-mono text-sm font-bold text-emerald-400">11,419,650</div>
+                    </div>
+                    <div class="h-6 w-px bg-steam-border"></div>
+                    <div class="flex items-center gap-1.5 text-xs text-slate-300">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-cyan-400 animate-spin" style="animation-duration: 12s;"></i>
+                        <span>Live-feed</span>
+                    </div>
+                </div>
+
+                <!-- Right Controls: Watchlist & Currency Switcher -->
+                <div class="flex items-center gap-2.5 sm:gap-3">
+                    <!-- Watchlist Button -->
+                    <button onclick="openWatchlistModal()" class="relative flex items-center gap-2 px-3.5 py-2 rounded-xl bg-steam-surface hover:bg-steam-hover border border-steam-border text-sm font-medium text-slate-200 transition-all">
+                        <i data-lucide="bell" class="w-4 h-4 text-amber-400"></i>
+                        <span class="hidden sm:inline">Bevakningslista</span>
+                        <span id="watchlist-badge" class="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-slate-950 bg-cyan-400 rounded-full">0</span>
+                    </button>
+
+                    <!-- Currency Switcher (SEK / EUR) -->
+                    <div class="flex items-center bg-steam-surface p-1 rounded-xl border border-steam-border" role="group" aria-label="Valutaväljare">
+                        <button id="btn-sek" onclick="setCurrency('SEK')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-cyan-500 text-slate-950 shadow-sm">
+                            SEK (kr)
+                        </button>
+                        <button id="btn-eur" onclick="setCurrency('EUR')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white">
+                            EUR (€)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        
+        <!-- Hero Banner / Highlight Stats -->
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-gradient-to-br from-steam-surface to-steam-card border border-steam-border rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">Mest Spelade Idag</span>
+                    <h2 class="text-lg font-bold text-white mt-0.5">Counter-Strike 2</h2>
+                    <p class="text-xs text-slate-400 mt-1">1,482,910 aktiva spelare just nu</p>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                    <i data-lucide="crosshair" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <div class="bg-gradient-to-br from-steam-surface to-steam-card border border-steam-border rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400">Hetaste Nya Releases 2026</span>
+                    <h2 class="text-lg font-bold text-white mt-0.5">Phantom Blade Zero & Forza 6</h2>
+                    <p class="text-xs text-slate-400 mt-1">Jämför nycklar upp till -38% rabatt</p>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <i data-lucide="flame" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <div class="bg-gradient-to-br from-steam-surface to-steam-card border border-steam-border rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-semibold uppercase tracking-wider text-lime-400">Prisgaranti & Transparens</span>
+                    <h2 class="text-lg font-bold text-white mt-0.5">Officiella & Keyshops</h2>
+                    <p class="text-xs text-slate-400 mt-1">Steam, G2A, CDKeys, Eneba & Fanatical</p>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-lime-500/10 border border-lime-500/20 flex items-center justify-center text-lime-400">
+                    <i data-lucide="shield-check" class="w-6 h-6"></i>
+                </div>
+            </div>
+        </section>
+
+        <!-- Search, Category Filters & Sorting Controls -->
+        <section class="bg-steam-surface border border-steam-border rounded-2xl p-4 space-y-4 shadow-xl">
+            <div class="flex flex-col lg:flex-row gap-3 justify-between">
+                <!-- Search Input -->
+                <div class="relative flex-1">
+                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        placeholder="Sök på speltitel (t.ex. Counter-Strike 2, Monster Hunter Wilds, Rust)..." 
+                        class="w-full bg-steam-bg border border-steam-border focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition-all"
+                    >
+                    <button id="clear-search" onclick="clearSearch()" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <!-- Sort Dropdown & View Toggle -->
+                <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
+                    <div class="flex items-center gap-2 w-full sm:w-auto">
+                        <label for="sort-select" class="text-xs font-semibold text-slate-400 whitespace-nowrap flex items-center gap-1.5">
+                            <i data-lucide="arrow-up-down" class="w-3.5 h-3.5 text-cyan-400"></i>
+                            Sortera:
+                        </label>
+                        <select id="sort-select" class="w-full sm:w-52 bg-steam-bg border border-steam-border focus:border-cyan-400 rounded-xl px-3 py-2.5 text-sm text-white outline-none cursor-pointer">
+                            <option value="players_desc">Flest spelare just nu</option>
+                            <option value="peak24_desc">24h Peak (Högst först)</option>
+                            <option value="price_asc">Lägsta pris</option>
+                            <option value="discount_desc">Störst rabatt (%)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Genre / Category Filter Pills -->
+            <div class="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar" id="category-filters">
+                <button data-category="Alla" class="cat-btn active px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-cyan-500 text-slate-950 transition-all whitespace-nowrap">
+                    Alla spel (16)
+                </button>
+                <button data-category="FPS/Taktiskt" class="cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-slate-300 hover:bg-steam-hover border border-steam-border transition-all whitespace-nowrap">
+                    FPS / Taktiskt
+                </button>
+                <button data-category="RPG/Action" class="cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-slate-300 hover:bg-steam-hover border border-steam-border transition-all whitespace-nowrap">
+                    RPG / Action
+                </button>
+                <button data-category="Överlevnad/Sandbox" class="cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-slate-300 hover:bg-steam-hover border border-steam-border transition-all whitespace-nowrap">
+                    Överlevnad / Sandbox
+                </button>
+                <button data-category="Gratis att spela" class="cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-slate-300 hover:bg-steam-hover border border-steam-border transition-all whitespace-nowrap">
+                    Gratis att spela
+                </button>
+                <button data-category="Rea/Bäst pris" class="cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-lime-400 hover:bg-steam-hover border border-lime-500/30 transition-all whitespace-nowrap flex items-center gap-1">
+                    <i data-lucide="tag" class="w-3 h-3"></i>
+                    Rea / Bäst pris
+                </button>
+            </div>
+        </section>
+
+        <!-- Table Column Header (Desktop) -->
+        <div class="hidden lg:grid lg:grid-cols-12 gap-4 px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-steam-border/60">
+            <div class="col-span-4 flex items-center gap-4">
+                <span class="w-8 text-center">#</span>
+                <span>Spel & Genre</span>
+            </div>
+            <div class="col-span-3 grid grid-cols-3 text-right">
+                <span>Spelare Nu</span>
+                <span>24h Peak</span>
+                <span>All-Time</span>
+            </div>
+            <div class="col-span-2 text-center">24h Trend</div>
+            <div class="col-span-3 text-right pr-2">Steam vs. Bästa Pris</div>
+        </div>
+
+        <!-- Games List Container -->
+        <section id="games-container" class="space-y-3">
+            <!-- Dynamic game cards/rows injected via JS -->
+        </section>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="hidden bg-steam-surface border border-steam-border rounded-2xl p-12 text-center space-y-3">
+            <div class="w-14 h-14 rounded-2xl bg-steam-bg border border-steam-border flex items-center justify-center mx-auto text-slate-400">
+                <i data-lucide="search-x" class="w-7 h-7"></i>
+            </div>
+            <h3 class="text-lg font-bold text-white">Inga spel matchade din sökning</h3>
+            <p class="text-sm text-slate-400 max-w-md mx-auto">Prova att ändra dina filter, söka på en annan speltitel eller återställ alla filter.</p>
+            <button onclick="resetFilters()" class="mt-2 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-sm font-bold transition-all">
+                Återställ filter
+            </button>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-steam-border bg-steam-surface/50 mt-12 py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+            <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-200">SteamPulse & Deals</span>
+                <span>•</span>
+                <span>Oberoende spelstatistik & prisjämförelse (2026)</span>
+            </div>
+            <p class="text-center sm:text-right max-w-lg">
+                Priser och spelarantal uppdateras kontinuerligt. Vi skiljer alltid tydligt mellan officiella Steam-återförsäljare och tredjeparts marknadsplatser (keyshops).
+            </p>
+        </div>
+    </footer>
+
+    <!-- =====================================================================
+         MODAL 1: DETALJ- & PRISJÄMFÖRELSEMODAL
+    ====================================================================== -->
+    <div id="game-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+        <div class="bg-steam-surface border border-steam-border rounded-2xl max-w-4xl w-full shadow-2xl overflow-hidden my-auto animate-fade-in">
+            <!-- Modal Top Banner -->
+            <div id="modal-header-bg" class="relative p-5 sm:p-6 border-b border-steam-border bg-gradient-to-r from-steam-card via-steam-surface to-steam-bg">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="flex items-center gap-4">
+                        <div id="modal-game-badge" class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center font-extrabold text-xl text-white shadow-lg shrink-0">
+                            CS2
+                        </div>
+                        <div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span id="modal-rank" class="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-400 font-mono text-xs font-bold">#1</span>
+                                <span id="modal-genres" class="text-xs text-slate-400">FPS/Taktiskt • Gratis att spela</span>
+                            </div>
+                            <h2 id="modal-title" class="text-xl sm:text-2xl font-extrabold text-white mt-1">Counter-Strike 2</h2>
+                            <p id="modal-dev" class="text-xs text-slate-400 mt-0.5">Utvecklare: Valve • Steam AppID: 730</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button id="modal-watchlist-btn" onclick="toggleWatchlistFromModal()" class="p-2.5 rounded-xl bg-steam-bg hover:bg-steam-hover border border-steam-border text-slate-300 transition-all" title="Lägg till i bevakningslista">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                        </button>
+                        <button onclick="closeGameModal()" class="p-2.5 rounded-xl bg-steam-bg hover:bg-red-500/20 hover:text-red-400 border border-steam-border text-slate-300 transition-all" aria-label="Stäng">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Telemetry Grid inside Modal -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+                    <div class="bg-steam-bg/80 border border-steam-border/80 rounded-xl p-3">
+                        <div class="text-[11px] text-slate-400 flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                            Spelare Just Nu
+                        </div>
+                        <div id="modal-players-now" class="font-mono text-base sm:text-lg font-bold text-emerald-400 mt-0.5">1,482,910</div>
+                    </div>
+                    <div class="bg-steam-bg/80 border border-steam-border/80 rounded-xl p-3">
+                        <div class="text-[11px] text-slate-400">24-timmars Peak</div>
+                        <div id="modal-peak-24" class="font-mono text-base sm:text-lg font-bold text-white mt-0.5">1,612,400</div>
+                    </div>
+                    <div class="bg-steam-bg/80 border border-steam-border/80 rounded-xl p-3">
+                        <div class="text-[11px] text-slate-400">All-Time Peak</div>
+                        <div id="modal-peak-all" class="font-mono text-base sm:text-lg font-bold text-cyan-400 mt-0.5">1,862,531</div>
+                    </div>
+                    <div class="bg-steam-bg/80 border border-steam-border/80 rounded-xl p-3">
+                        <div class="text-[11px] text-slate-400">Lägsta pris någonsin</div>
+                        <div id="modal-historical-low" class="font-mono text-base sm:text-lg font-bold text-lime-400 mt-0.5">Gratis / 119 kr</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Body: Edition Selector, Price Alert & Retailer Comparison -->
+            <div class="p-5 sm:p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+                
+                <!-- Edition & Target Price Alert Bar -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-steam-bg p-3.5 rounded-xl border border-steam-border">
+                    <!-- Edition Switcher -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-semibold text-slate-400">Utgåva:</span>
+                        <div class="inline-flex rounded-lg bg-steam-surface p-1 border border-steam-border">
+                            <button id="ed-standard" onclick="switchEdition('standard')" class="px-3 py-1 rounded-md text-xs font-bold bg-cyan-500 text-slate-950 transition-all">
+                                Standard Edition
+                            </button>
+                            <button id="ed-deluxe" onclick="switchEdition('deluxe')" class="px-3 py-1 rounded-md text-xs font-bold text-slate-400 hover:text-white transition-all">
+                                Deluxe / Ultimate
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quick Price Alert Input -->
+                    <div id="alert-box" class="flex items-center gap-2">
+                        <label for="target-price-input" class="text-xs font-semibold text-slate-300 whitespace-nowrap">Målpris (<span class="currency-label">SEK</span>):</label>
+                        <input type="number" id="target-price-input" placeholder="T.ex. 250" class="w-24 bg-steam-surface border border-steam-border focus:border-cyan-400 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white outline-none">
+                        <button onclick="savePriceAlert()" class="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all whitespace-nowrap">
+                            Bevaka pris
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Price Comparison Table -->
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                            <i data-lucide="shopping-cart" class="w-4 h-4 text-cyan-400"></i>
+                            Prisjämförelse mellan butiker
+                        </h3>
+                        <span class="text-xs text-slate-400">Sorterat efter lägsta pris</span>
+                    </div>
+
+                    <div id="retailers-list" class="space-y-2.5">
+                        <!-- Retailer rows injected via JS -->
+                    </div>
+                </div>
+
+                <!-- External Price Trackers & SteamDB Deep Links -->
+                <div class="pt-3 border-t border-steam-border flex flex-wrap items-center justify-between gap-3">
+                    <span class="text-xs text-slate-400 font-medium">Fördjupad prishistorik & statistik:</span>
+                    <div id="external-trackers" class="flex flex-wrap items-center gap-2">
+                        <!-- External links injected via JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL 2: BEVAKNINGSLISTA (WISHLIST / PRISVARNINGAR)
+    ====================================================================== -->
+    <div id="watchlist-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm">
+        <div class="bg-steam-surface border border-steam-border rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden">
+            <div class="p-5 border-b border-steam-border flex items-center justify-between bg-steam-card">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                        <i data-lucide="bell-ring" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-bold text-white">Min Bevakningslista</h2>
+                        <p class="text-xs text-slate-400">Dina sparade spel och prisvarningar (sparas lokalt)</p>
+                    </div>
+                </div>
+                <button onclick="closeWatchlistModal()" class="p-2 rounded-xl bg-steam-bg hover:bg-slate-800 border border-steam-border text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div id="watchlist-content" class="p-5 max-h-[65vh] overflow-y-auto space-y-3">
+                <!-- Watchlist items injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- =====================================================================
+         JAVASCRIPT APPLICATION LOGIC
+    ====================================================================== -->
+    <script>
+        // Currency Configuration (1 EUR ≈ 11.40 SEK in 2026)
+        const EXCHANGE_RATE_SEK = 11.40;
+        let currentCurrency = 'SEK';
+        let currentCategory = 'Alla';
+        let currentSort = 'players_desc';
+        let searchQuery = '';
+        let selectedGameId = null;
+        let selectedEdition = 'standard';
+
+        // Load Watchlist from localStorage
+        let watchlist = JSON.parse(localStorage.getItem('steampulse_watchlist_2026')) || [];
+
+        // Comprehensive 2026 Steam Popular & Most Played Dataset
+        // Prices stored in EUR as base currency for accurate conversion to SEK
+        const gamesData = [
+            {
+                id: 'cs2',
+                rank: 1,
+                appId: 730,
+                title: 'Counter-Strike 2',
+                shortCode: 'CS2',
+                gradient: 'from-amber-500 to-orange-600',
+                developer: 'Valve',
+                genres: ['FPS/Taktiskt', 'Gratis att spela'],
+                isFreeToPlay: true,
+                editionNote: 'Prime Status Upgrade',
+                playersNow: 1482910,
+                peak24h: 1612400,
+                allTimePeak: 1862531,
+                steamPriceEur: 14.99, // Prime Status price
+                deluxeMultiplier: 1.8,
+                historicalLowEur: 11.99,
+                trend24h: [1120, 980, 890, 840, 870, 950, 1100, 1290, 1450, 1580, 1612, 1482],
+                offers: [
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 14.99, urlType: 'steam' },
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 12.49, urlType: 'cdkeys' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Gift', priceEur: 12.89, urlType: 'eneba' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 13.19, urlType: 'g2a' },
+                    { store: 'Kinguin', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 13.45, urlType: 'kinguin' }
+                ]
+            },
+            {
+                id: 'dota2',
+                rank: 2,
+                appId: 570,
+                title: 'Dota 2',
+                shortCode: 'DOTA',
+                gradient: 'from-red-600 to-rose-800',
+                developer: 'Valve',
+                genres: ['Gratis att spela', 'RPG/Action'],
+                isFreeToPlay: true,
+                editionNote: 'Gratis + Crownfall Bundle',
+                playersNow: 764320,
+                peak24h: 845100,
+                allTimePeak: 1295114,
+                steamPriceEur: 0,
+                deluxeMultiplier: 1,
+                historicalLowEur: 0,
+                trend24h: [610, 540, 490, 470, 510, 580, 670, 750, 820, 845, 810, 764],
+                offers: [
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Gratis att spela', priceEur: 0, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'pubg',
+                rank: 3,
+                appId: 578080,
+                title: 'PUBG: BATTLEGROUNDS',
+                shortCode: 'PUBG',
+                gradient: 'from-yellow-500 to-amber-700',
+                developer: 'KRAFTON, Inc.',
+                genres: ['FPS/Taktiskt', 'Gratis att spela', 'Överlevnad/Sandbox'],
+                isFreeToPlay: true,
+                editionNote: 'Battlegrounds Plus',
+                playersNow: 689450,
+                peak24h: 792300,
+                allTimePeak: 3257248,
+                steamPriceEur: 12.99,
+                deluxeMultiplier: 1.9,
+                historicalLowEur: 9.49,
+                trend24h: [520, 440, 390, 380, 420, 510, 630, 740, 792, 760, 720, 689],
+                offers: [
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Gratis / Plus DLC', priceEur: 12.99, urlType: 'steam' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 9.79, urlType: 'g2a' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 10.15, urlType: 'eneba' },
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 10.49, urlType: 'cdkeys' }
+                ]
+            },
+            {
+                id: 'phantom-blade-zero',
+                rank: 4,
+                appId: 2841920,
+                title: 'Phantom Blade Zero',
+                shortCode: 'PBZ',
+                gradient: 'from-slate-700 to-cyan-700',
+                developer: 'S-GAME',
+                genres: ['RPG/Action'],
+                isFreeToPlay: false,
+                playersNow: 512840,
+                peak24h: 589200,
+                allTimePeak: 642100,
+                steamPriceEur: 69.99,
+                deluxeMultiplier: 1.28,
+                historicalLowEur: 43.99,
+                trend24h: [380, 340, 310, 300, 330, 390, 450, 510, 560, 589, 550, 512],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 44.49, urlType: 'cdkeys' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'EU / Global', platform: 'Steam Key', priceEur: 46.20, urlType: 'eneba' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 47.90, urlType: 'g2a' },
+                    { store: 'Fanatical', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 57.99, urlType: 'fanatical' },
+                    { store: 'Green Man Gaming', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 59.49, urlType: 'gmg' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 69.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'monster-hunter-wilds',
+                rank: 5,
+                appId: 2246340,
+                title: 'Monster Hunter Wilds',
+                shortCode: 'MHW',
+                gradient: 'from-emerald-600 to-teal-800',
+                developer: 'CAPCOM Co., Ltd.',
+                genres: ['RPG/Action'],
+                isFreeToPlay: false,
+                playersNow: 428910,
+                peak24h: 495600,
+                allTimePeak: 1384608,
+                steamPriceEur: 69.99,
+                deluxeMultiplier: 1.28,
+                historicalLowEur: 36.49,
+                trend24h: [310, 280, 250, 245, 270, 320, 380, 430, 475, 495, 460, 428],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 36.99, urlType: 'cdkeys' },
+                    { store: 'Kinguin', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 38.49, urlType: 'kinguin' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 39.20, urlType: 'g2a' },
+                    { store: 'Green Man Gaming', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 52.49, urlType: 'gmg' },
+                    { store: 'Fanatical', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 53.99, urlType: 'fanatical' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 69.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'marvel-rivals',
+                rank: 6,
+                appId: 2767030,
+                title: 'Marvel Rivals',
+                shortCode: 'MR',
+                gradient: 'from-indigo-600 to-purple-800',
+                developer: 'NetEase Games',
+                genres: ['FPS/Taktiskt', 'Gratis att spela'],
+                isFreeToPlay: true,
+                playersNow: 364120,
+                peak24h: 418900,
+                allTimePeak: 644269,
+                steamPriceEur: 0,
+                deluxeMultiplier: 1,
+                historicalLowEur: 0,
+                trend24h: [270, 230, 200, 195, 220, 265, 315, 360, 395, 418, 390, 364],
+                offers: [
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Gratis att spela', priceEur: 0, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'apex-legends',
+                rank: 7,
+                appId: 1172470,
+                title: 'Apex Legends™',
+                shortCode: 'APEX',
+                gradient: 'from-rose-600 to-red-900',
+                developer: 'Respawn Entertainment',
+                genres: ['FPS/Taktiskt', 'Gratis att spela'],
+                isFreeToPlay: true,
+                playersNow: 298450,
+                peak24h: 352100,
+                allTimePeak: 624473,
+                steamPriceEur: 0,
+                deluxeMultiplier: 1,
+                historicalLowEur: 0,
+                trend24h: [230, 200, 180, 175, 195, 230, 275, 315, 340, 352, 325, 298],
+                offers: [
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Gratis att spela', priceEur: 0, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'slay-the-spire-2',
+                rank: 8,
+                appId: 2868840,
+                title: 'Slay the Spire 2',
+                shortCode: 'STS2',
+                gradient: 'from-violet-600 to-fuchsia-800',
+                developer: 'Mega Crit',
+                genres: ['RPG/Action'],
+                isFreeToPlay: false,
+                playersNow: 245780,
+                peak24h: 279400,
+                allTimePeak: 312900,
+                steamPriceEur: 24.99,
+                deluxeMultiplier: 1.35,
+                historicalLowEur: 18.49,
+                trend24h: [190, 175, 160, 155, 170, 195, 220, 245, 268, 279, 260, 245],
+                offers: [
+                    { store: 'Fanatical', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 19.49, urlType: 'fanatical' },
+                    { store: 'Green Man Gaming', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 19.99, urlType: 'gmg' },
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 18.79, urlType: 'cdkeys' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 20.49, urlType: 'g2a' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 24.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'rust',
+                rank: 9,
+                appId: 252490,
+                title: 'Rust',
+                shortCode: 'RUST',
+                gradient: 'from-orange-600 to-stone-800',
+                developer: 'Facepunch Studios',
+                genres: ['Överlevnad/Sandbox', 'FPS/Taktiskt'],
+                isFreeToPlay: false,
+                playersNow: 198640,
+                peak24h: 224500,
+                allTimePeak: 245243,
+                steamPriceEur: 39.99,
+                deluxeMultiplier: 1.4,
+                historicalLowEur: 16.99,
+                trend24h: [155, 140, 128, 125, 138, 158, 180, 202, 218, 224, 210, 198],
+                offers: [
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 19.49, urlType: 'g2a' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Gift', priceEur: 20.29, urlType: 'eneba' },
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 21.19, urlType: 'cdkeys' },
+                    { store: 'Kinguin', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 21.80, urlType: 'kinguin' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 39.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'forza-horizon-6',
+                rank: 10,
+                appId: 2915410,
+                title: 'Forza Horizon 6',
+                shortCode: 'FH6',
+                gradient: 'from-pink-500 to-cyan-600',
+                developer: 'Playground Games',
+                genres: ['RPG/Action'],
+                isFreeToPlay: false,
+                playersNow: 176320,
+                peak24h: 204800,
+                allTimePeak: 248900,
+                steamPriceEur: 69.99,
+                deluxeMultiplier: 1.42,
+                historicalLowEur: 46.99,
+                trend24h: [130, 118, 108, 105, 115, 135, 160, 182, 198, 204, 190, 176],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 47.49, urlType: 'cdkeys' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 49.90, urlType: 'eneba' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 51.20, urlType: 'g2a' },
+                    { store: 'Green Man Gaming', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 59.49, urlType: 'gmg' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 69.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'baldurs-gate-3',
+                rank: 11,
+                appId: 1086940,
+                title: "Baldur's Gate 3",
+                shortCode: 'BG3',
+                gradient: 'from-amber-700 to-purple-900',
+                developer: 'Larian Studios',
+                genres: ['RPG/Action'],
+                isFreeToPlay: false,
+                playersNow: 152890,
+                peak24h: 178400,
+                allTimePeak: 875343,
+                steamPriceEur: 59.99,
+                deluxeMultiplier: 1.16,
+                historicalLowEur: 38.99,
+                trend24h: [115, 105, 96, 94, 102, 118, 138, 156, 170, 178, 165, 152],
+                offers: [
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Gift', priceEur: 41.99, urlType: 'g2a' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'EU', platform: 'Steam Gift', priceEur: 42.80, urlType: 'eneba' },
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 44.49, urlType: 'cdkeys' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 59.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'stalker-2',
+                rank: 12,
+                appId: 1643320,
+                title: 'S.T.A.L.K.E.R. 2: Heart of Chornobyl',
+                shortCode: 'STLK2',
+                gradient: 'from-yellow-700 to-emerald-950',
+                developer: 'GSC Game World',
+                genres: ['FPS/Taktiskt', 'Överlevnad/Sandbox', 'RPG/Action'],
+                isFreeToPlay: false,
+                playersNow: 128450,
+                peak24h: 149200,
+                allTimePeak: 121335,
+                steamPriceEur: 59.99,
+                deluxeMultiplier: 1.33,
+                historicalLowEur: 31.49,
+                trend24h: [95, 86, 78, 76, 84, 98, 115, 132, 144, 149, 138, 128],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 31.99, urlType: 'cdkeys' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 33.40, urlType: 'eneba' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 34.15, urlType: 'g2a' },
+                    { store: 'Fanatical', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 44.99, urlType: 'fanatical' },
+                    { store: 'Green Man Gaming', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 46.79, urlType: 'gmg' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 59.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'dayz',
+                rank: 13,
+                appId: 221100,
+                title: 'DayZ',
+                shortCode: 'DAYZ',
+                gradient: 'from-stone-600 to-emerald-900',
+                developer: 'Bohemia Interactive',
+                genres: ['Överlevnad/Sandbox', 'FPS/Taktiskt'],
+                isFreeToPlay: false,
+                playersNow: 109820,
+                peak24h: 126400,
+                allTimePeak: 87412,
+                steamPriceEur: 44.99,
+                deluxeMultiplier: 1.3,
+                historicalLowEur: 18.99,
+                trend24h: [82, 74, 68, 66, 72, 84, 98, 112, 122, 126, 118, 109],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 21.49, urlType: 'cdkeys' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 22.89, urlType: 'g2a' },
+                    { store: 'Kinguin', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 23.40, urlType: 'kinguin' },
+                    { store: 'Fanatical', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 29.99, urlType: 'fanatical' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 44.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'bannerlord',
+                rank: 14,
+                appId: 261550,
+                title: 'Mount & Blade II: Bannerlord',
+                shortCode: 'M&B2',
+                gradient: 'from-red-800 to-amber-900',
+                developer: 'TaleWorlds Entertainment',
+                genres: ['RPG/Action', 'Överlevnad/Sandbox'],
+                isFreeToPlay: false,
+                playersNow: 94510,
+                peak24h: 112300,
+                allTimePeak: 248216,
+                steamPriceEur: 49.99,
+                deluxeMultiplier: 1.2,
+                historicalLowEur: 19.49,
+                trend24h: [72, 65, 60, 58, 63, 74, 86, 98, 108, 112, 102, 94],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 20.49, urlType: 'cdkeys' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 21.80, urlType: 'eneba' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 22.49, urlType: 'g2a' },
+                    { store: 'Green Man Gaming', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 29.99, urlType: 'gmg' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 49.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'ets2',
+                rank: 15,
+                appId: 227300,
+                title: 'Euro Truck Simulator 2',
+                shortCode: 'ETS2',
+                gradient: 'from-sky-600 to-blue-900',
+                developer: 'SCS Software',
+                genres: ['Överlevnad/Sandbox'],
+                isFreeToPlay: false,
+                playersNow: 84290,
+                peak24h: 98700,
+                allTimePeak: 72678,
+                steamPriceEur: 19.99,
+                deluxeMultiplier: 1.75,
+                historicalLowEur: 4.49,
+                trend24h: [62, 55, 49, 48, 53, 64, 76, 88, 95, 98, 91, 84],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 4.79, urlType: 'cdkeys' },
+                    { store: 'Eneba', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 4.99, urlType: 'eneba' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 5.29, urlType: 'g2a' },
+                    { store: 'Fanatical', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 6.99, urlType: 'fanatical' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 19.99, urlType: 'steam' }
+                ]
+            },
+            {
+                id: 'ready-or-not',
+                rank: 16,
+                appId: 1144200,
+                title: 'Ready or Not',
+                shortCode: 'RoN',
+                gradient: 'from-blue-800 to-slate-900',
+                developer: 'VOID Interactive',
+                genres: ['FPS/Taktiskt'],
+                isFreeToPlay: false,
+                playersNow: 71640,
+                peak24h: 84900,
+                allTimePeak: 55110,
+                steamPriceEur: 49.99,
+                deluxeMultiplier: 1.35,
+                historicalLowEur: 22.99,
+                trend24h: [54, 48, 43, 42, 46, 55, 65, 74, 81, 84, 78, 71],
+                offers: [
+                    { store: 'CDKeys (Loaded)', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 23.49, urlType: 'cdkeys' },
+                    { store: 'G2A', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 24.90, urlType: 'g2a' },
+                    { store: 'Kinguin', type: 'Keyshop / Marknadsplats', region: 'Global / EU', platform: 'Steam Key', priceEur: 25.49, urlType: 'kinguin' },
+                    { store: 'Fanatical', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Key', priceEur: 33.49, urlType: 'fanatical' },
+                    { store: 'Steam (Officiell)', type: 'Officiell återförsäljare', region: 'Global / EU', platform: 'Steam Direkt', priceEur: 49.99, urlType: 'steam' }
+                ]
+            }
+        ];
+
+        // =====================================================================
+        // HELPER FUNCTIONS: FORMATTING & URL BUILDERS
+        // =====================================================================
+
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+
+        function formatPrice(eurAmount, isFreeToPlay = false) {
+            if (eurAmount === 0) return 'Gratis';
+            if (currentCurrency === 'EUR') {
+                return eurAmount.toFixed(2).replace('.', ',') + ' €';
+            } else {
+                const sek = Math.round(eurAmount * EXCHANGE_RATE_SEK);
+                return sek + ' kr';
+            }
+        }
+
+        function getNumericPrice(eurAmount) {
+            if (eurAmount === 0) return 0;
+            return currentCurrency === 'EUR' ? Number(eurAmount.toFixed(2)) : Math.round(eurAmount * EXCHANGE_RATE_SEK);
+        }
+
+        function getBestOffer(game, edition = 'standard') {
+            const mult = edition === 'deluxe' ? game.deluxeMultiplier : 1;
+            const sorted = [...game.offers].sort((a, b) => a.priceEur - b.priceEur);
+            const best = sorted[0];
+            return {
+                ...best,
+                adjustedPriceEur: best.priceEur * mult
+            };
+        }
+
+        function getDiscountPercent(game) {
+            if (game.steamPriceEur === 0) return 0;
+            const best = getBestOffer(game, 'standard');
+            const diff = game.steamPriceEur - best.adjustedPriceEur;
+            if (diff <= 0) return 0;
+            return Math.round((diff / game.steamPriceEur) * 100);
+        }
+
+        function buildStoreSearchUrl(urlType, game) {
+            const q = encodeURIComponent(game.title);
+            switch (urlType) {
+                case 'steam':
+                    return `https://store.steampowered.com/app/${game.appId}/`;
+                case 'g2a':
+                    return `https://www.g2a.com/search?query=${q}`;
+                case 'cdkeys':
+                    return `https://www.cdkeys.com/catalogsearch/result/?q=${q}`;
+                case 'eneba':
+                    return `https://www.eneba.com/store/all?text=${q}`;
+                case 'kinguin':
+                    return `https://www.kinguin.net/listing?phrase=${q}`;
+                case 'gmg':
+                    return `https://www.greenmangaming.com/search?query=${q}`;
+                case 'fanatical':
+                    return `https://www.fanatical.com/en/search?search=${q}`;
+                case 'steamdb':
+                    return `https://steamdb.info/app/${game.appId}/`;
+                case 'isthereanydeal':
+                    return `https://isthereanydeal.com/search/?q=${q}`;
+                case 'ggdeals':
+                    return `https://gg.deals/games/?title=${q}`;
+                default:
+                    return `https://store.steampowered.com/search/?term=${q}`;
+            }
+        }
+
+        // Generate crisp SVG Sparkline for 24h player trend
+        function generateSparklineSVG(dataPoints, id) {
+            const width = 130;
+            const height = 38;
+            const padding = 4;
+            const min = Math.min(...dataPoints);
+            const max = Math.max(...dataPoints);
+            const range = max - min || 1;
+
+            const points = dataPoints.map((val, idx) => {
+                const x = padding + (idx / (dataPoints.length - 1)) * (width - padding * 2);
+                const y = height - padding - ((val - min) / range) * (height - padding * 2);
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+            });
+
+            const polylinePoints = points.join(' ');
+            const areaPoints = `${padding},${height - padding} ${polylinePoints} ${width - padding},${height - padding}`;
+
+            // Determine trend color (up vs down compared to 24h ago)
+            const isUp = dataPoints[dataPoints.length - 1] >= dataPoints[0];
+            const strokeColor = isUp ? '#10b981' : '#00e5ff';
+            const gradId = `spark-grad-${id}`;
+
+            return `
+                <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" class="overflow-visible mx-auto">
+                    <defs>
+                        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="${strokeColor}" stop-opacity="0.32"/>
+                            <stop offset="100%" stop-color="${strokeColor}" stop-opacity="0.0"/>
+                        </linearGradient>
+                    </defs>
+                    <polygon points="${areaPoints}" fill="url(#${gradId})" />
+                    <polyline fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${polylinePoints}" />
+                    <circle cx="${points[points.length - 1].split(',')[0]}" cy="${points[points.length - 1].split(',')[1]}" r="2.8" fill="${strokeColor}" />
+                </svg>
+            `;
+        }
+
+        // =====================================================================
+        // RENDERING GAMES LIST
+        // =====================================================================
+
+        function renderGames() {
+            const container = document.getElementById('games-container');
+            const emptyState = document.getElementById('empty-state');
+
+            // 1. Filter
+            let filtered = gamesData.filter(game => {
+                const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                      game.genres.some(g => g.toLowerCase().includes(searchQuery.toLowerCase()));
+                if (!matchesSearch) return false;
+
+                if (currentCategory === 'Alla') return true;
+                if (currentCategory === 'Rea/Bäst pris') {
+                    return getDiscountPercent(game) >= 20;
+                }
+                return game.genres.includes(currentCategory);
+            });
+
+            // 2. Sort
+            filtered.sort((a, b) => {
+                if (currentSort === 'players_desc') return b.playersNow - a.playersNow;
+                if (currentSort === 'peak24_desc') return b.peak24h - a.peak24h;
+                if (currentSort === 'price_asc') {
+                    const priceA = getBestOffer(a).adjustedPriceEur;
+                    const priceB = getBestOffer(b).adjustedPriceEur;
+                    return priceA - priceB;
+                }
+                if (currentSort === 'discount_desc') {
+                    return getDiscountPercent(b) - getDiscountPercent(a);
+                }
+                return 0;
+            });
+
+            // Update empty state visibility
+            if (filtered.length === 0) {
+                container.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            // 3. Build HTML
+            container.innerHTML = filtered.map(game => {
+                const bestOffer = getBestOffer(game);
+                const discount = getDiscountPercent(game);
+                const isWatched = watchlist.some(w => w.id === game.id);
+
+                // Price Display HTML
+                let priceBlockHtml = '';
+                if (game.steamPriceEur === 0) {
+                    priceBlockHtml = `
+                        <div class="flex flex-col items-end">
+                            <span class="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono text-xs font-bold">
+                                Gratis att spela
+                            </span>
+                            <span class="text-[11px] text-slate-400 mt-1">Officiell Steam-titel</span>
+                        </div>
+                    `;
+                } else {
+                    priceBlockHtml = `
+                        <div class="flex flex-col items-end">
+                            <div class="flex items-center gap-2">
+                                ${discount > 0 ? `<span class="px-1.5 py-0.5 rounded bg-lime-400 text-slate-950 font-mono text-xs font-extrabold">-${discount}%</span>` : ''}
+                                <span class="text-xs text-slate-400 line-through font-mono">${formatPrice(game.steamPriceEur)}</span>
+                                <span class="font-mono text-base font-extrabold text-white">${formatPrice(bestOffer.adjustedPriceEur)}</span>
+                            </div>
+                            <span class="text-[11px] text-cyan-400 mt-0.5 flex items-center gap-1">
+                                Bäst hos <strong class="font-semibold">${bestOffer.store.replace(' (Officiell)', '')}</strong>
+                                ${game.editionNote ? `<span class="text-slate-400">(${game.editionNote})</span>` : ''}
+                            </span>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div onclick="openGameModal('${game.id}')" class="game-row-glow group bg-steam-surface hover:bg-steam-card border border-steam-border rounded-2xl p-4 transition-all cursor-pointer">
+                        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+                            
+                            <!-- Col 1-4: Rank, Artwork Badge, Title & Genre Tags -->
+                            <div class="lg:col-span-4 flex items-center gap-3.5">
+                                <div class="w-8 text-center font-mono text-sm font-bold ${game.rank <= 3 ? 'text-cyan-400' : 'text-slate-400'}">
+                                    #${game.rank}
+                                </div>
+                                <div class="w-12 h-12 rounded-xl bg-gradient-to-br ${game.gradient} flex items-center justify-center font-extrabold text-sm text-white shadow-md shrink-0 group-hover:scale-105 transition-transform">
+                                    ${game.shortCode}
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <h3 class="font-bold text-white text-base truncate group-hover:text-cyan-400 transition-colors">${game.title}</h3>
+                                        ${isWatched ? '<i data-lucide="bell-ring" class="w-3.5 h-3.5 text-amber-400 shrink-0"></i>' : ''}
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                                        ${game.genres.map(genre => `
+                                            <span class="px-2 py-0.5 rounded-md bg-steam-bg text-slate-300 border border-steam-border/80 text-[11px] font-medium">
+                                                ${genre}
+                                            </span>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Col 5-7: Player Stats (Live, 24h Peak, All-time Peak) -->
+                            <div class="lg:col-span-3 grid grid-cols-3 gap-2 bg-steam-bg/60 lg:bg-transparent p-2.5 lg:p-0 rounded-xl border border-steam-border/50 lg:border-0 text-left lg:text-right">
+                                <div>
+                                    <div class="text-[10px] text-slate-400 lg:hidden">Spelare Nu</div>
+                                    <div class="inline-flex items-center gap-1.5 font-mono text-sm font-bold text-emerald-400">
+                                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                        ${formatNumber(game.playersNow)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-[10px] text-slate-400 lg:hidden">24h Peak</div>
+                                    <div class="font-mono text-sm font-semibold text-slate-200">
+                                        ${formatNumber(game.peak24h)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-[10px] text-slate-400 lg:hidden">All-Time</div>
+                                    <div class="font-mono text-sm text-slate-400">
+                                        ${formatNumber(game.allTimePeak)}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Col 8-9: 24h Sparkline Graph -->
+                            <div class="lg:col-span-2 flex items-center justify-between lg:justify-center px-1">
+                                <span class="text-xs text-slate-400 lg:hidden">24h spelarutveckling:</span>
+                                ${generateSparklineSVG(game.trend24h, game.id)}
+                            </div>
+
+                            <!-- Col 10-12: Price Comparison & CTA Button -->
+                            <div class="lg:col-span-3 flex items-center justify-between lg:justify-end gap-3 pt-2 lg:pt-0 border-t lg:border-0 border-steam-border/60">
+                                ${priceBlockHtml}
+                                <button onclick="event.stopPropagation(); openGameModal('${game.id}')" class="px-3.5 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 border border-cyan-500/30 font-bold text-xs transition-all whitespace-nowrap flex items-center gap-1.5">
+                                    <span>Jämför priser</span>
+                                    <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Re-initialize Lucide icons for newly rendered elements
+            lucide.createIcons();
+        }
+
+        // =====================================================================
+        // DETAIL & PRICE COMPARISON MODAL LOGIC
+        // =====================================================================
+
+        function openGameModal(gameId) {
+            selectedGameId = gameId;
+            selectedEdition = 'standard';
+            const game = gamesData.find(g => g.id === gameId);
+            if (!game) return;
+
+            // Populate Header Info
+            const badge = document.getElementById('modal-game-badge');
+            badge.className = `w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br ${game.gradient} flex items-center justify-center font-extrabold text-xl text-white shadow-lg shrink-0`;
+            badge.textContent = game.shortCode;
+
+            document.getElementById('modal-rank').textContent = `#${game.rank} på Steam`;
+            document.getElementById('modal-genres').textContent = game.genres.join(' • ');
+            document.getElementById('modal-title').textContent = game.title;
+            document.getElementById('modal-dev').textContent = `Utvecklare: ${game.developer} • Steam AppID: ${game.appId}`;
+
+            // Telemetry
+            document.getElementById('modal-players-now').textContent = formatNumber(game.playersNow);
+            document.getElementById('modal-peak-24').textContent = formatNumber(game.peak24h);
+            document.getElementById('modal-peak-all').textContent = formatNumber(game.allTimePeak);
+            document.getElementById('modal-historical-low').textContent = game.historicalLowEur === 0 ? 'Gratis' : formatPrice(game.historicalLowEur);
+
+            // Reset Edition Buttons
+            updateEditionUI();
+            updateWatchlistButtonInModal();
+
+            // Pre-fill target price suggestion if paid game
+            const targetInput = document.getElementById('target-price-input');
+            const alertBox = document.getElementById('alert-box');
+            if (game.steamPriceEur === 0) {
+                alertBox.classList.add('hidden');
+            } else {
+                alertBox.classList.remove('hidden');
+                const existing = watchlist.find(w => w.id === game.id);
+                if (existing && existing.targetPriceEur) {
+                    targetInput.value = getNumericPrice(existing.targetPriceEur);
+                } else {
+                    const best = getBestOffer(game, 'standard');
+                    targetInput.value = Math.max(1, Math.floor(getNumericPrice(best.adjustedPriceEur) * 0.85));
+                }
+            }
+
+            renderRetailersInModal();
+
+            const modal = document.getElementById('game-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function closeGameModal() {
+            const modal = document.getElementById('game-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            selectedGameId = null;
+        }
+
+        function switchEdition(edition) {
+            selectedEdition = edition;
+            updateEditionUI();
+            renderRetailersInModal();
+        }
+
+        function updateEditionUI() {
+            const stdBtn = document.getElementById('ed-standard');
+            const dlxBtn = document.getElementById('ed-deluxe');
+            if (selectedEdition === 'standard') {
+                stdBtn.className = 'px-3 py-1 rounded-md text-xs font-bold bg-cyan-500 text-slate-950 transition-all';
+                dlxBtn.className = 'px-3 py-1 rounded-md text-xs font-bold text-slate-400 hover:text-white transition-all';
+            } else {
+                dlxBtn.className = 'px-3 py-1 rounded-md text-xs font-bold bg-cyan-500 text-slate-950 transition-all';
+                stdBtn.className = 'px-3 py-1 rounded-md text-xs font-bold text-slate-400 hover:text-white transition-all';
+            }
+        }
+
+        function renderRetailersInModal() {
+            const game = gamesData.find(g => g.id === selectedGameId);
+            if (!game) return;
+
+            const mult = selectedEdition === 'deluxe' ? game.deluxeMultiplier : 1;
+            const steamBase = game.steamPriceEur * mult;
+
+            // Sort offers lowest first
+            const sortedOffers = [...game.offers]
+                .map(o => ({ ...o, finalPriceEur: o.priceEur * mult }))
+                .sort((a, b) => a.finalPriceEur - b.finalPriceEur);
+
+            const retailersContainer = document.getElementById('retailers-list');
+            retailersContainer.innerHTML = sortedOffers.map((offer, idx) => {
+                const isBest = idx === 0 && offer.finalPriceEur > 0;
+                const isOfficial = offer.type === 'Officiell återförsäljare';
+                const discount = steamBase > 0 ? Math.round(((steamBase - offer.finalPriceEur) / steamBase) * 100) : 0;
+                const searchUrl = buildStoreSearchUrl(offer.urlType, game);
+
+                return `
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border ${isBest ? 'bg-emerald-950/20 border-emerald-500/40' : 'bg-steam-bg border-steam-border'} hover:border-cyan-500/50 transition-all">
+                        <div class="space-y-1">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="font-bold text-white text-sm">${offer.store}</span>
+                                ${isBest ? '<span class="px-2 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-extrabold uppercase">Bästa Pris</span>' : ''}
+                                <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${isOfficial ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30' : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'}">
+                                    ${offer.type}
+                                </span>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                                <span class="flex items-center gap-1">
+                                    <i data-lucide="globe" class="w-3 h-3 text-slate-400"></i>
+                                    Region: <strong class="text-slate-300 font-medium">${offer.region}</strong>
+                                </span>
+                                <span>•</span>
+                                <span class="flex items-center gap-1">
+                                    <i data-lucide="key" class="w-3 h-3 text-slate-400"></i>
+                                    Plattform: <strong class="text-slate-300 font-medium">${offer.platform}</strong>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-steam-border/50">
+                            <div class="text-left sm:text-right">
+                                <div class="flex items-center sm:justify-end gap-1.5">
+                                    ${discount > 0 ? `<span class="px-1.5 py-0.5 rounded bg-lime-400 text-slate-950 font-mono text-xs font-extrabold">-${discount}%</span>` : ''}
+                                    <span class="font-mono text-lg font-extrabold text-white">${formatPrice(offer.finalPriceEur)}</span>
+                                </div>
+                                <span class="text-[10px] text-slate-400">${selectedEdition === 'deluxe' ? 'Deluxe Edition' : 'Standard Edition'}</span>
+                            </div>
+
+                            <a href="${searchUrl}" target="_blank" rel="noopener noreferrer" class="px-4 py-2 rounded-xl ${isBest ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950' : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'} font-bold text-xs transition-all flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                                <span>Gå till butik</span>
+                                <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // External Trackers (SteamDB, IsThereAnyDeal, GG.deals)
+            const trackersContainer = document.getElementById('external-trackers');
+            const trackers = [
+                { name: 'SteamDB', url: buildStoreSearchUrl('steamdb', game) },
+                { name: 'GG.deals', url: buildStoreSearchUrl('ggdeals', game) },
+                { name: 'IsThereAnyDeal', url: buildStoreSearchUrl('isthereanydeal', game) }
+            ];
+            trackersContainer.innerHTML = trackers.map(t => `
+                <a href="${t.url}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-steam-bg hover:bg-steam-hover border border-steam-border text-xs font-semibold text-cyan-400 flex items-center gap-1.5 transition-all">
+                    <span>${t.name}</span>
+                    <i data-lucide="arrow-up-right" class="w-3.5 h-3.5"></i>
+                </a>
+            `).join('');
+
+            lucide.createIcons();
+        }
+
+        // =====================================================================
+        // WATCHLIST & PRICE ALERTS (localStorage)
+        // =====================================================================
+
+        function saveWatchlist() {
+            localStorage.setItem('steampulse_watchlist_2026', JSON.stringify(watchlist));
+            updateWatchlistBadge();
+            renderGames();
+        }
+
+        function updateWatchlistBadge() {
+            document.getElementById('watchlist-badge').textContent = watchlist.length;
+        }
+
+        function updateWatchlistButtonInModal() {
+            const btn = document.getElementById('modal-watchlist-btn');
+            const isWatched = watchlist.some(w => w.id === selectedGameId);
+            if (isWatched) {
+                btn.className = 'p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/50 text-amber-400 transition-all';
+                btn.innerHTML = '<i data-lucide="bell-ring" class="w-5 h-5"></i>';
+            } else {
+                btn.className = 'p-2.5 rounded-xl bg-steam-bg hover:bg-steam-hover border border-steam-border text-slate-300 transition-all';
+                btn.innerHTML = '<i data-lucide="bell" class="w-5 h-5"></i>';
+            }
+            lucide.createIcons();
+        }
+
+        function toggleWatchlistFromModal() {
+            if (!selectedGameId) return;
+            const game = gamesData.find(g => g.id === selectedGameId);
+            const idx = watchlist.findIndex(w => w.id === selectedGameId);
+
+            if (idx > -1) {
+                watchlist.splice(idx, 1);
+                showToast(`${game.title} togs bort från bevakningslistan.`, 'info');
+            } else {
+                const best = getBestOffer(game);
+                watchlist.push({
+                    id: game.id,
+                    targetPriceEur: best.adjustedPriceEur,
+                    addedAt: new Date().toLocaleDateString('sv-SE')
+                });
+                showToast(`${game.title} lades till i din bevakningslista!`, 'success');
+            }
+            saveWatchlist();
+            updateWatchlistButtonInModal();
+        }
+
+        function savePriceAlert() {
+            if (!selectedGameId) return;
+            const game = gamesData.find(g => g.id === selectedGameId);
+            const rawVal = parseFloat(document.getElementById('target-price-input').value);
+            if (isNaN(rawVal) || rawVal < 0) {
+                showToast('Ange ett giltigt målpris.', 'error');
+                return;
+            }
+
+            const targetEur = currentCurrency === 'EUR' ? rawVal : (rawVal / EXCHANGE_RATE_SEK);
+            const idx = watchlist.findIndex(w => w.id === selectedGameId);
+
+            if (idx > -1) {
+                watchlist[idx].targetPriceEur = targetEur;
+            } else {
+                watchlist.push({
+                    id: game.id,
+                    targetPriceEur: targetEur,
+                    addedAt: new Date().toLocaleDateString('sv-SE')
+                });
+            }
+
+            saveWatchlist();
+            updateWatchlistButtonInModal();
+            showToast(`Prisvarning sparad för ${game.title} (${formatPrice(targetEur)})!`, 'success');
+        }
+
+        function removeFromWatchlist(gameId) {
+            watchlist = watchlist.filter(w => w.id !== gameId);
+            saveWatchlist();
+            renderWatchlistModal();
+            showToast('Spelet togs bort från bevakningslistan.', 'info');
+        }
+
+        function openWatchlistModal() {
+            renderWatchlistModal();
+            const modal = document.getElementById('watchlist-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeWatchlistModal() {
+            const modal = document.getElementById('watchlist-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function renderWatchlistModal() {
+            const container = document.getElementById('watchlist-content');
+            if (watchlist.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 space-y-2">
+                        <i data-lucide="bell-off" class="w-10 h-10 text-slate-500 mx-auto"></i>
+                        <h3 class="text-base font-bold text-white">Din bevakningslista är tom</h3>
+                        <p class="text-xs text-slate-400 max-w-sm mx-auto">Klicka på ett spel i listan för att ställa in ett målpris och bevaka rabatter hos Steam, G2A och CDKeys.</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = watchlist.map(item => {
+                const game = gamesData.find(g => g.id === item.id);
+                if (!game) return '';
+                const best = getBestOffer(game);
+                const targetReached = best.adjustedPriceEur <= item.targetPriceEur;
+
+                return `
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-steam-bg border ${targetReached ? 'border-emerald-500/50' : 'border-steam-border'}">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br ${game.gradient} flex items-center justify-center font-bold text-xs text-white shrink-0">
+                                ${game.shortCode}
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h4 class="font-bold text-white text-sm">${game.title}</h4>
+                                    ${targetReached ? '<span class="px-2 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-extrabold">Målpris uppnått!</span>' : ''}
+                                </div>
+                                <div class="text-xs text-slate-400 mt-0.5">
+                                    Målpris: <strong class="text-cyan-400 font-mono">${formatPrice(item.targetPriceEur)}</strong> • 
+                                    Nuvarande bästa: <strong class="text-white font-mono">${formatPrice(best.adjustedPriceEur)}</strong> (${best.store.replace(' (Officiell)', '')})
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 self-end sm:self-center">
+                            <button onclick="closeWatchlistModal(); openGameModal('${game.id}')" class="px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 text-xs font-bold transition-all">
+                                Visa priser
+                            </button>
+                            <button onclick="removeFromWatchlist('${game.id}')" class="p-1.5 rounded-lg bg-steam-surface hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-steam-border transition-all" title="Ta bort">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            lucide.createIcons();
+        }
+
+        // =====================================================================
+        // CURRENCY, FILTERS, SEARCH & LIVE SIMULATION
+        // =====================================================================
+
+        function setCurrency(currency) {
+            currentCurrency = currency;
+            const btnSek = document.getElementById('btn-sek');
+            const btnEur = document.getElementById('btn-eur');
+
+            if (currency === 'SEK') {
+                btnSek.className = 'px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-cyan-500 text-slate-950 shadow-sm';
+                btnEur.className = 'px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white';
+            } else {
+                btnEur.className = 'px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-cyan-500 text-slate-950 shadow-sm';
+                btnSek.className = 'px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white';
+            }
+
+            document.querySelectorAll('.currency-label').forEach(el => el.textContent = currency);
+            renderGames();
+            if (selectedGameId) {
+                openGameModal(selectedGameId);
+            }
+        }
+
+        function clearSearch() {
+            const input = document.getElementById('search-input');
+            input.value = '';
+            searchQuery = '';
+            document.getElementById('clear-search').classList.add('hidden');
+            renderGames();
+        }
+
+        function resetFilters() {
+            clearSearch();
+            currentCategory = 'Alla';
+            currentSort = 'players_desc';
+            document.getElementById('sort-select').value = 'players_desc';
+
+            document.querySelectorAll('.cat-btn').forEach(btn => {
+                if (btn.dataset.category === 'Alla') {
+                    btn.className = 'cat-btn active px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-cyan-500 text-slate-950 transition-all whitespace-nowrap';
+                } else if (btn.dataset.category === 'Rea/Bäst pris') {
+                    btn.className = 'cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-lime-400 hover:bg-steam-hover border border-lime-500/30 transition-all whitespace-nowrap flex items-center gap-1';
+                } else {
+                    btn.className = 'cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-slate-300 hover:bg-steam-hover border border-steam-border transition-all whitespace-nowrap';
+                }
+            });
+
+            renderGames();
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const borderClass = type === 'success' ? 'border-emerald-500/50 text-emerald-300' : type === 'error' ? 'border-red-500/50 text-red-300' : 'border-cyan-500/50 text-cyan-300';
+            
+            toast.className = `pointer-events-auto bg-steam-card border ${borderClass} px-4 py-3 rounded-xl shadow-2xl text-xs font-semibold flex items-center gap-2.5 transition-all transform translate-y-2 opacity-0`;
+            toast.innerHTML = `
+                <i data-lucide="${type === 'success' ? 'check-circle-2' : 'info'}" class="w-4 h-4 shrink-0"></i>
+                <span>${message}</span>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3200);
+        }
+
+        // Subtle live telemetry fluctuation every 6 seconds to simulate live Steam Web API
+        function startLiveTelemetry() {
+            setInterval(() => {
+                let totalDelta = 0;
+                gamesData.forEach(game => {
+                    const delta = Math.floor((Math.random() - 0.48) * (game.playersNow * 0.0025));
+                    game.playersNow = Math.max(1000, game.playersNow + delta);
+                    totalDelta += delta;
+                });
+
+                const globalOnlineEl = document.getElementById('global-online');
+                const globalIngameEl = document.getElementById('global-ingame');
+                if (globalOnlineEl && globalIngameEl) {
+                    const currOnline = parseInt(globalOnlineEl.textContent.replace(/,/g, ''), 10);
+                    const currIngame = parseInt(globalIngameEl.textContent.replace(/,/g, ''), 10);
+                    globalOnlineEl.textContent = formatNumber(currOnline + totalDelta * 2);
+                    globalIngameEl.textContent = formatNumber(currIngame + totalDelta);
+                }
+
+                // Re-render list smoothly if user isn't actively hovering/clicking inside modal
+                if (!selectedGameId) {
+                    renderGames();
+                }
+            }, 6000);
+        }
+
+        // =====================================================================
+        // EVENT LISTENERS & INITIALIZATION
+        // =====================================================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Search input listener
+            const searchInput = document.getElementById('search-input');
+            const clearBtn = document.getElementById('clear-search');
+            searchInput.addEventListener('input', (e) => {
+                searchQuery = e.target.value;
+                clearBtn.classList.toggle('hidden', searchQuery.length === 0);
+                renderGames();
+            });
+
+            // Sort dropdown listener
+            document.getElementById('sort-select').addEventListener('change', (e) => {
+                currentSort = e.target.value;
+                renderGames();
+            });
+
+            // Category buttons listener
+            document.querySelectorAll('.cat-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    currentCategory = btn.dataset.category;
+                    document.querySelectorAll('.cat-btn').forEach(b => {
+                        if (b === btn) {
+                            b.className = 'cat-btn active px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-cyan-500 text-slate-950 transition-all whitespace-nowrap flex items-center gap-1';
+                        } else if (b.dataset.category === 'Rea/Bäst pris') {
+                            b.className = 'cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-lime-400 hover:bg-steam-hover border border-lime-500/30 transition-all whitespace-nowrap flex items-center gap-1';
+                        } else {
+                            b.className = 'cat-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-steam-bg text-slate-300 hover:bg-steam-hover border border-steam-border transition-all whitespace-nowrap';
+                        }
+                    });
+                    renderGames();
+                });
+            });
+
+            // Close modals on backdrop click or Escape key
+            document.getElementById('game-modal').addEventListener('click', (e) => {
+                if (e.target.id === 'game-modal') closeGameModal();
+            });
+            document.getElementById('watchlist-modal').addEventListener('click', (e) => {
+                if (e.target.id === 'watchlist-modal') closeWatchlistModal();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeGameModal();
+                    closeWatchlistModal();
+                }
+            });
+
+            updateWatchlistBadge();
+            renderGames();
+            startLiveTelemetry();
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

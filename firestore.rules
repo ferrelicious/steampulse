@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidWatchlistItem(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.gameTitle is string &&
+             data.gameTitle.size() >= 1 &&
+             data.gameTitle.size() <= 120 &&
+             data.targetPriceEur is number &&
+             data.targetPriceEur >= 0 &&
+             data.targetPriceEur <= 1000 &&
+             data.preferredCurrency in ['SEK', 'EUR'] &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    match /users/{userId}/watchlist/{gameId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(gameId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(gameId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(['userId', 'gameTitle', 'targetPriceEur', 'preferredCurrency', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'gameTitle', 'targetPriceEur', 'preferredCurrency', 'createdAt', 'updatedAt']) &&
+                       isValidWatchlistItem(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(gameId) &&
+                       request.auth.uid == userId &&
+                       isValidWatchlistItem(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['targetPriceEur', 'preferredCurrency', 'gameTitle', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && isValidId(gameId) && request.auth.uid == userId;
+    }
+  }
+}
