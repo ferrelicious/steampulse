@@ -56,6 +56,22 @@ jobs:
                 },
                 "oauth_client": [
                   {
+                    "client_id": "116329660329-4987mmv4f0rb6agl2vagmqdn2e53e4fv.apps.googleusercontent.com",
+                    "client_type": 1,
+                    "android_info": {
+                      "package_name": "com.ferrelicious.steampulse",
+                      "certificate_hash": "51141e2e5601d08962fe750a1c32782693f1444c"
+                    }
+                  },
+                  {
+                    "client_id": "116329660329-t26e7dep7ca6jh0s1bmfft8k2bvlfu6k.apps.googleusercontent.com",
+                    "client_type": 1,
+                    "android_info": {
+                      "package_name": "com.ferrelicious.steampulse",
+                      "certificate_hash": "839cb61c0e08e1ed151b69cf71abe745c3f4d844"
+                    }
+                  },
+                  {
                     "client_id": "116329660329-3pk93eilel8km7r1sh0u2q6lu9risl2h.apps.googleusercontent.com",
                     "client_type": 3
                   }
@@ -85,17 +101,10 @@ jobs:
             echo "Använder sparad debug.keystore från GitHub Secrets."
           else
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-            echo "================ KOPIERA DENNA BASE64 TILL GITHUB SECRET ================"
-            base64 -w 0 debug.keystore
-            echo ""
-            echo "========================================================================="
           fi
           mkdir -p ~/.android app
           cp debug.keystore ~/.android/debug.keystore
           cp debug.keystore app/debug.keystore
-          echo "================ FINGERPRINTS ================"
-          keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
-          echo "=============================================="
 
       - name: Build Debug APK
         run: |
@@ -105,6 +114,9 @@ jobs:
           else
             gradle assembleDebug
           fi
+          echo "================ APK SIGNATURE ================"
+          keytool -printcert -jarfile app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA1:|SHA256:"
+          echo "==============================================="
 
       - name: Resolve release tag
         id: meta
