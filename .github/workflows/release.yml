@@ -41,7 +41,7 @@ jobs:
         run: ./gradlew assembleDebug
 
       - name: Build Signed Release APK (if secrets configured)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: env.KEYSTORE_BASE64 != ''
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
@@ -66,9 +66,9 @@ jobs:
           name: "SteamPulse & Deals ${{ steps.meta.outputs.TAG }}"
           prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true' || contains(steps.meta.outputs.TAG, '-') }}
           generate_release_notes: true
-          body_path: CHANGELOG.md
           files: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHU
+          B_TOKEN }}
