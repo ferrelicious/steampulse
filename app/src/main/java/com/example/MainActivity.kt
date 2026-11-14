@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,6 +82,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.auth.authStateFlow
 import com.example.auth.signOut
+import com.example.data.GitHubReleaseRepository
 import com.example.data.SteamGamesCatalog
 import com.example.data.WatchlistRepository
 import com.example.firebase.configureAppCheck
@@ -89,6 +91,7 @@ import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ImageStudioScreen
 import com.example.ui.screens.PulseDealsScreen
+import com.example.ui.screens.ReleaseScreen
 import com.example.ui.screens.WatchlistScreen
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
@@ -102,6 +105,7 @@ import com.example.ui.theme.SteamTextPrimary
 import com.example.ui.theme.SteamTextSecondary
 import com.example.viewmodel.AiChatViewModel
 import com.example.viewmodel.ImageStudioViewModel
+import com.example.viewmodel.ReleaseViewModel
 import com.example.viewmodel.SteamPulseViewModel
 import com.example.viewmodel.WatchlistUiState
 import com.google.firebase.Firebase
@@ -173,12 +177,23 @@ private fun AuthenticatedAppShell(currentUserId: String) {
     )
     val aiChatViewModel: AiChatViewModel = viewModel(key = "chat_$currentUserId")
     val imageStudioViewModel: ImageStudioViewModel = viewModel(key = "studio_$currentUserId")
+    val releaseViewModel: ReleaseViewModel = viewModel(
+        key = "releases",
+        factory = viewModelFactory {
+            initializer {
+                val app = checkNotNull(this[APPLICATION_KEY])
+                ReleaseViewModel(GitHubReleaseRepository(app))
+            }
+        }
+    )
 
     val uiState by pulseViewModel.uiState.collectAsStateWithLifecycle()
     val watchlistState by pulseViewModel.watchlistState.collectAsStateWithLifecycle()
+    val releaseState by releaseViewModel.uiState.collectAsStateWithLifecycle()
     val watchlistItems = (watchlistState as? WatchlistUiState.Success)?.items.orEmpty()
 
     var currentTab by rememberSaveable { mutableStateOf(AppTab.PULSE) }
+    var showReleasePage by rememberSaveable { mutableStateOf(false) }
     var pendingAiPrompt by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -188,7 +203,11 @@ private fun AuthenticatedAppShell(currentUserId: String) {
         }
     }
 
-    if (currentTab != AppTab.PULSE) {
+    if (showReleasePage) {
+        BackHandler {
+            showReleasePage = false
+        }
+    } else if (currentTab != AppTab.PULSE) {
         BackHandler {
             currentTab = AppTab.PULSE
         }
@@ -239,6 +258,45 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                     }
                 },
                 actions = {
+                    // GitHub Releases / App Update Pill Button
+                    Surface(
+                        onClick = { showReleasePage = !showReleasePage },
+                        color = if (showReleasePage || releaseState.hasUpdateAvailable) {
+                            SteamNeon.copy(alpha = 0.16f)
+                        } else {
+                            SteamBg
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (showReleasePage || releaseState.hasUpdateAvailable) SteamNeon else SteamBorder
+                        ),
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .minimumInteractiveComponentSize()
+                            .testTag("open_releases_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SystemUpdate,
+                                contentDescription = androidx.compose.ui.res.stringResource(R.string.release_open_button_desc),
+                                tint = if (releaseState.hasUpdateAvailable || showReleasePage) SteamNeon else SteamAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (releaseState.hasUpdateAvailable) "Uppdatera" else "v${releaseState.currentVersionName}",
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = if (releaseState.hasUpdateAvailable || showReleasePage) SteamNeon else SteamTextPrimary
+                            )
+                        }
+                    }
+
                     // SEK / EUR Currency Switcher
                     Surface(
                         color = SteamBg,
@@ -294,7 +352,10 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                             val selected = currentTab == tab
                             NavigationBarItem(
                                 selected = selected,
-                                onClick = { currentTab = tab },
+                                onClick = {
+                                    showReleasePage = false
+                                    currentTab = tab
+                                },
                                 icon = {
                                     TabIconWithBadge(
                                         tab = tab,
@@ -341,7 +402,10 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                             val selected = currentTab == tab
                             NavigationRailItem(
                                 selected = selected,
-                                onClick = { currentTab = tab },
+                                onClick = {
+                                    showReleasePage = false
+                                    currentTab = tab
+                                },
                                 icon = {
                                     TabIconWithBadge(
                                         tab = tab,
@@ -374,49 +438,60 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                             .widthIn(max = 900.dp)
                             .fillMaxSize()
                     ) {
-                        when (currentTab) {
-                            AppTab.PULSE -> PulseDealsScreen(
-                                uiState = uiState,
-                                watchlistItems = watchlistItems,
-                                onSearchChange = pulseViewModel::updateSearchQuery,
-                                onCategorySelect = pulseViewModel::selectCategory,
-                                onSortSelect = pulseViewModel::selectSortOrder,
-                                onResetFilters = pulseViewModel::resetFilters,
-                                onOpenGameDetail = pulseViewModel::openGameDetail,
-                                onCloseGameDetail = pulseViewModel::closeGameDetail,
-                                onSelectEdition = pulseViewModel::selectEdition,
-                                onToggleWatchlist = pulseViewModel::toggleWatchlist,
-                                onSavePriceAlert = pulseViewModel::savePriceAlert,
-                                onAskAiAboutGame = { game ->
-                                    val (bestOffer, bestEur) = SteamGamesCatalog.getBestOffer(game)
-                                    val bestFormatted = SteamGamesCatalog.formatPrice(bestEur, uiState.currency)
-                                    val steamFormatted = SteamGamesCatalog.formatPrice(game.steamPriceEur, uiState.currency)
-                                    pendingAiPrompt =
-                                        "Analysera dealen för ${game.title}: Steam kostar $steamFormatted, lägsta pris är $bestFormatted hos ${bestOffer.store}. Bör jag slå till nu eller vänta på rea?"
-                                    currentTab = AppTab.AI_CHAT
-                                }
+                        if (showReleasePage) {
+                            ReleaseScreen(
+                                uiState = releaseState,
+                                onRepoInputChange = releaseViewModel::updateRepoInput,
+                                onTogglePrereleases = releaseViewModel::toggleIncludePrereleases,
+                                onSaveAndCheck = releaseViewModel::saveAndCheckUpdates,
+                                onRefresh = releaseViewModel::refreshReleases,
+                                onClose = { showReleasePage = false }
                             )
+                        } else {
+                            when (currentTab) {
+                                AppTab.PULSE -> PulseDealsScreen(
+                                    uiState = uiState,
+                                    watchlistItems = watchlistItems,
+                                    onSearchChange = pulseViewModel::updateSearchQuery,
+                                    onCategorySelect = pulseViewModel::selectCategory,
+                                    onSortSelect = pulseViewModel::selectSortOrder,
+                                    onResetFilters = pulseViewModel::resetFilters,
+                                    onOpenGameDetail = pulseViewModel::openGameDetail,
+                                    onCloseGameDetail = pulseViewModel::closeGameDetail,
+                                    onSelectEdition = pulseViewModel::selectEdition,
+                                    onToggleWatchlist = pulseViewModel::toggleWatchlist,
+                                    onSavePriceAlert = pulseViewModel::savePriceAlert,
+                                    onAskAiAboutGame = { game ->
+                                        val (bestOffer, bestEur) = SteamGamesCatalog.getBestOffer(game)
+                                        val bestFormatted = SteamGamesCatalog.formatPrice(bestEur, uiState.currency)
+                                        val steamFormatted = SteamGamesCatalog.formatPrice(game.steamPriceEur, uiState.currency)
+                                        pendingAiPrompt =
+                                            "Analysera dealen för ${game.title}: Steam kostar $steamFormatted, lägsta pris är $bestFormatted hos ${bestOffer.store}. Bör jag slå till nu eller vänta på rea?"
+                                        currentTab = AppTab.AI_CHAT
+                                    }
+                                )
 
-                            AppTab.WATCHLIST -> WatchlistScreen(
-                                watchlistState = watchlistState,
-                                games = uiState.games,
-                                currency = uiState.currency,
-                                onOpenGame = { gameId ->
-                                    pulseViewModel.openGameDetail(gameId)
-                                    currentTab = AppTab.PULSE
-                                },
-                                onRemoveItem = pulseViewModel::removeWatchlistItem
-                            )
+                                AppTab.WATCHLIST -> WatchlistScreen(
+                                    watchlistState = watchlistState,
+                                    games = uiState.games,
+                                    currency = uiState.currency,
+                                    onOpenGame = { gameId ->
+                                        pulseViewModel.openGameDetail(gameId)
+                                        currentTab = AppTab.PULSE
+                                    },
+                                    onRemoveItem = pulseViewModel::removeWatchlistItem
+                                )
 
-                            AppTab.AI_CHAT -> AiChatScreen(
-                                viewModel = aiChatViewModel,
-                                initialPrompt = pendingAiPrompt,
-                                onConsumeInitialPrompt = { pendingAiPrompt = null }
-                            )
+                                AppTab.AI_CHAT -> AiChatScreen(
+                                    viewModel = aiChatViewModel,
+                                    initialPrompt = pendingAiPrompt,
+                                    onConsumeInitialPrompt = { pendingAiPrompt = null }
+                                )
 
-                            AppTab.IMAGE_STUDIO -> ImageStudioScreen(
-                                viewModel = imageStudioViewModel
-                            )
+                                AppTab.IMAGE_STUDIO -> ImageStudioScreen(
+                                    viewModel = imageStudioViewModel
+                                )
+                            }
                         }
                     }
                 }
