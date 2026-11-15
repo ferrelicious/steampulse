@@ -4,4 +4,6 @@
     <string name="release_open_button_desc">Öppna GitHub Releases och appuppdateringar</string>
     <string name="release_repo_label">GitHub-repository (ägare/repo eller URL)</string>
     <string name="release_repo_placeholder">t.ex. dittnamn/steampulse-android</string>
+    <string name="workshop_title">Steam Workshop</string>
+    <string name="workshop_subtitle">Topp 100 populära spel &amp; community-moddar</string>
 </resources>

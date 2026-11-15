@@ -27,10 +27,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -93,6 +95,7 @@ import com.example.ui.screens.ImageStudioScreen
 import com.example.ui.screens.PulseDealsScreen
 import com.example.ui.screens.ReleaseScreen
 import com.example.ui.screens.WatchlistScreen
+import com.example.ui.screens.WorkshopScreen
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
 import com.example.ui.theme.SteamBg
@@ -108,6 +111,7 @@ import com.example.viewmodel.ImageStudioViewModel
 import com.example.viewmodel.ReleaseViewModel
 import com.example.viewmodel.SteamPulseViewModel
 import com.example.viewmodel.WatchlistUiState
+import com.example.viewmodel.WorkshopViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
@@ -119,10 +123,11 @@ enum class AppTab(
     val unselectedIcon: ImageVector,
     val testTag: String
 ) {
-    PULSE("Puls & Deals", Icons.Rounded.Bolt, Icons.Outlined.Bolt, "tab_pulse"),
-    WATCHLIST("Bevakning", Icons.Rounded.Notifications, Icons.Outlined.Notifications, "tab_watchlist"),
+    PULSE("Puls", Icons.Rounded.Bolt, Icons.Outlined.Bolt, "tab_pulse"),
+    WORKSHOP("Workshop", Icons.Rounded.Extension, Icons.Outlined.Extension, "tab_workshop"),
+    WATCHLIST("Bevaka", Icons.Rounded.Notifications, Icons.Outlined.Notifications, "tab_watchlist"),
     AI_CHAT("AI-Råd", Icons.Rounded.AutoAwesome, Icons.Outlined.AutoAwesome, "tab_ai_chat"),
-    IMAGE_STUDIO("Bildstudio", Icons.Rounded.Image, Icons.Outlined.Image, "tab_image_studio")
+    IMAGE_STUDIO("Studio", Icons.Rounded.Image, Icons.Outlined.Image, "tab_image_studio")
 }
 
 class MainActivity : ComponentActivity() {
@@ -186,10 +191,12 @@ private fun AuthenticatedAppShell(currentUserId: String) {
             }
         }
     )
+    val workshopViewModel: WorkshopViewModel = viewModel(key = "workshop")
 
     val uiState by pulseViewModel.uiState.collectAsStateWithLifecycle()
     val watchlistState by pulseViewModel.watchlistState.collectAsStateWithLifecycle()
     val releaseState by releaseViewModel.uiState.collectAsStateWithLifecycle()
+    val workshopState by workshopViewModel.uiState.collectAsStateWithLifecycle()
     val watchlistItems = (watchlistState as? WatchlistUiState.Success)?.items.orEmpty()
 
     var currentTab by rememberSaveable { mutableStateOf(AppTab.PULSE) }
@@ -469,6 +476,24 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                             "Analysera dealen för ${game.title}: Steam kostar $steamFormatted, lägsta pris är $bestFormatted hos ${bestOffer.store}. Bör jag slå till nu eller vänta på rea?"
                                         currentTab = AppTab.AI_CHAT
                                     }
+                                )
+
+                                AppTab.WORKSHOP -> WorkshopScreen(
+                                    uiState = workshopState,
+                                    onSelectLeaderboardMode = workshopViewModel::selectLeaderboardMode,
+                                    onGameSearchChange = workshopViewModel::updateGameSearchQuery,
+                                    onToggleOnlyWorkshopPowerhouses = workshopViewModel::toggleOnlyWorkshopPowerhouses,
+                                    onRefreshGames = workshopViewModel::refreshTop100Games,
+                                    onOpenGameWorkshop = workshopViewModel::openGameWorkshop,
+                                    onOpenCustomAppId = workshopViewModel::openCustomAppWorkshop,
+                                    onCloseGameWorkshop = workshopViewModel::closeGameWorkshop,
+                                    onSelectSortOrder = workshopViewModel::selectSortOrder,
+                                    onModSearchChange = workshopViewModel::updateModSearchQuery,
+                                    onSubmitModSearch = workshopViewModel::submitModSearch,
+                                    onRefreshMods = workshopViewModel::refreshMods,
+                                    onLoadMoreMods = workshopViewModel::loadMoreMods,
+                                    onOpenModDetail = workshopViewModel::openModDetail,
+                                    onCloseModDetail = workshopViewModel::closeModDetail
                                 )
 
                                 AppTab.WATCHLIST -> WatchlistScreen(
