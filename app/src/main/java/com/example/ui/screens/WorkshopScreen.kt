@@ -1039,7 +1039,7 @@ private fun GameWorkshopDetailPage(
                                             color = SteamTextSecondary
                                         )
                                         val diagText = modsState.diagnosticInfo.ifBlank {
-                                            "AppID: ${game.appId} • Status: 200 • 0 träffar"
+                                            "AppID: ${game.appId} • HTTP 200 • 0 träffar"
                                         }
                                         Surface(
                                             color = SteamBg,

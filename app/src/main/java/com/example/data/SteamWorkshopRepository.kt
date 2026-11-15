@@ -195,7 +195,7 @@ class SteamWorkshopRepository(
         lastError: IOException?
     ): String {
         val statusLabel = outcome?.statusCode?.toString() ?: "Fel"
-        val base = "AppID: $appId • Status: $statusLabel • $itemCount träffar"
+        val base = "AppID: $appId • HTTP $statusLabel • $itemCount träffar"
         if (outcome == null) {
             val errMsg = lastError?.message?.take(48).orEmpty()
             return if (errMsg.isNotBlank()) "$base • $errMsg" else base
@@ -338,7 +338,7 @@ class SteamWorkshopRepository(
 
     companion object {
         private const val DESKTOP_USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         const val STEAM_AGE_BYPASS_COOKIE =
             "birthtime=0; lastagecheckage=1-0-1990; wants_mature_content=1"
 
@@ -407,11 +407,11 @@ class SteamWorkshopRepository(
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         private val TITLE_REGEX = Regex(
-            """<(div|span|a|h[1-6])\b[^>]*class\s*=\s*['"][^'"]*\bworkshopItemTitle\b[^'"]*['"][^>]*>(.*?)</\1>""",
+            """<(div|span|a|h[1-6])\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopItemTitle|workshopBrowseRowTitle)\b[^'"]*['"][^>]*>(.*?)</\1>""",
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         private val AUTHOR_REGEX = Regex(
-            """<(div|span)\b[^>]*class\s*=\s*['"][^'"]*\bworkshopItemAuthor(?:Name)?\b[^'"]*['"][^>]*>(.*?)</\1>""",
+            """<(div|span)\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopItemAuthor(?:Name)?|workshopBrowseRowAuthor)\b[^'"]*['"][^>]*>(.*?)</\1>""",
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         private val ANCHOR_TEXT_REGEX = Regex("""<a\b[^>]*>(.*?)</a>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
@@ -470,10 +470,10 @@ class SteamWorkshopRepository(
             }
 
             return buildList {
-                // 1. Default browse without forced section works across standard, MTX, and curated workshops
-                add(makeUrl(section = null))
-                // 2. Standard mod/item section fallback
+                // 1. Standard mod/item browse section (canonical default)
                 add(makeUrl(section = "readytouseitems"))
+                // 2. Browse without forced section (covers mixed/curated workshops)
+                add(makeUrl(section = null))
                 // 3. AJAX/JSON browse fallback
                 add(makeUrl(section = "readytouseitems", ajax = true))
                 // 4. MTX/skins/curated items section fallback (e.g., CS2 / Dota 2 / TF2 / Rust)
@@ -631,14 +631,18 @@ class SteamWorkshopRepository(
             }
 
             // 1. Container-based parser: supports BOTH grid cards (.workshopItem) AND list rows (.workshopBrowseRow)
-            val chunks = WORKSHOP_CONTAINER_SPLIT_REGEX.split(html)
-            if (chunks.size > 1) {
-                chunks.drop(1).forEach { block ->
-                    val window = block.take(4500)
+            // Slice using match indices so opening tag attributes (e.g. id="sharedfile_...", data-publishedfileid) are preserved.
+            val containerMatches = WORKSHOP_CONTAINER_SPLIT_REGEX.findAll(html).toList()
+            if (containerMatches.isNotEmpty()) {
+                containerMatches.forEachIndexed { index, match ->
+                    val start = match.range.first
+                    val end = containerMatches.getOrNull(index + 1)?.range?.first
+                        ?: minOf(html.length, start + 4500)
+                    val window = html.substring(start, minOf(end, start + 4500))
                     val id = FILE_ID_REGEX.find(window)?.groupValues?.getOrNull(1)
                         ?: SHAREDFILE_DOM_ID_REGEX.find(window)?.groupValues?.getOrNull(1)
                         ?: LINK_ID_REGEX.find(window)?.groupValues?.getOrNull(1)
-                        ?: return@forEach
+                        ?: return@forEachIndexed
 
                     val rawTitle = TITLE_REGEX.find(window)?.groupValues?.getOrNull(2)
                         ?: HUB_LINK_FALLBACK_REGEX.findAll(window)

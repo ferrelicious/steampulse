@@ -117,10 +117,10 @@ class SteamWorkshopRepositoryTest {
         )
         assertTrue(defaultUrls[0].contains("browsesort=totaluniquesubscribers"))
         assertTrue(defaultUrls[0].contains("actualsort=totaluniquesubscribers"))
+        assertTrue(defaultUrls[0].contains("section=readytouseitems"))
         assertTrue(defaultUrls[0].contains("days=-1"))
         assertTrue(defaultUrls[0].contains("p=1"))
-        assertTrue(!defaultUrls[0].contains("section="))
-        assertTrue(defaultUrls.any { it.contains("section=readytouseitems") })
+        assertTrue(defaultUrls.any { !it.contains("section=") })
         assertTrue(defaultUrls.any { it.contains("section=mtxitems") })
         assertTrue(defaultUrls.any { it.endsWith("/app/730/workshop/") })
 
@@ -160,11 +160,14 @@ class SteamWorkshopRepositoryTest {
               <script>
                 SharedFileBindMouseHover( "sharedfile_88990011", true, { "id": "88990011", "title": "Better Maps Pack", "author": "MapMaker" } );
               </script>
+              <div id="sharedfile_99887766" class="workshopBrowseRow">
+                <div class="workshopBrowseRowTitle">Opening Tag ID Mod</div>
+              </div>
             </div>
         """.trimIndent()
 
         val items = SteamWorkshopRepository.parseWorkshopBrowseHtml(rowAndHoverHtml, 1144200)
-        assertEquals(3, items.size)
+        assertEquals(4, items.size)
 
         assertEquals("33112200", items[0].publishedFileId)
         assertEquals("Tactical Overhaul Mod", items[0].title)
@@ -174,9 +177,12 @@ class SteamWorkshopRepositoryTest {
         assertEquals("44556677", items[1].publishedFileId)
         assertEquals("Ready or Not AI Fix", items[1].title)
 
-        assertEquals("88990011", items[2].publishedFileId)
-        assertEquals("Better Maps Pack", items[2].title)
-        assertEquals("MapMaker", items[2].author)
+        assertEquals("99887766", items[2].publishedFileId)
+        assertEquals("Opening Tag ID Mod", items[2].title)
+
+        assertEquals("88990011", items[3].publishedFileId)
+        assertEquals("Better Maps Pack", items[3].title)
+        assertEquals("MapMaker", items[3].author)
     }
 
     @Test
