@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Button
@@ -62,6 +63,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -490,11 +495,20 @@ private fun Top100GamesDirectory(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkshopGameCard(
     game: WorkshopGameSummary,
     onClick: () -> Unit
 ) {
+    var imageAttempt by remember(game.appId) { mutableIntStateOf(0) }
+    val imageUrl = when (imageAttempt) {
+        0 -> game.headerImageUrl
+        1 -> game.fallbackHeaderImageUrl
+        2 -> game.capsuleImageUrl
+        else -> null
+    }
+
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = SteamSurface),
@@ -521,12 +535,33 @@ private fun WorkshopGameCard(
                     .clip(RoundedCornerShape(10.dp))
                     .background(SteamCard)
             ) {
-                AsyncImage(
-                    model = game.headerImageUrl,
-                    contentDescription = game.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (imageUrl != null) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = game.name,
+                        contentScale = ContentScale.Crop,
+                        onError = { imageAttempt += 1 },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(SteamCard, SteamSurface)
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SportsEsports,
+                            contentDescription = game.name,
+                            tint = SteamAccent.copy(alpha = 0.75f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
                 Surface(
                     color = Color(0xCC020617),
                     shape = RoundedCornerShape(bottomEnd = 8.dp)
@@ -536,6 +571,8 @@ private fun WorkshopGameCard(
                         fontFamily = JetBrainsMonoFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = SteamAccent,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
@@ -544,7 +581,7 @@ private fun WorkshopGameCard(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
                     text = game.name,
@@ -560,15 +597,17 @@ private fun WorkshopGameCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (game.ccu > 0) {
                         Text(
                             text = "${SteamGamesCatalog.formatNumber(game.ccu)} aktiva",
                             fontFamily = JetBrainsMonoFontFamily,
                             fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
                             color = SteamNeon
                         )
                     }
@@ -577,6 +616,8 @@ private fun WorkshopGameCard(
                             text = "$pct% pos",
                             fontFamily = JetBrainsMonoFontFamily,
                             fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
                             color = SteamSale
                         )
                     }
@@ -589,6 +630,8 @@ private fun WorkshopGameCard(
                                 text = "Workshop",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = SteamAccent,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
@@ -714,18 +757,40 @@ private fun GameWorkshopDetailPage(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column {
+                            var heroAttempt by remember(game.appId) { mutableIntStateOf(0) }
+                            val heroUrl = when (heroAttempt) {
+                                0 -> game.headerImageUrl
+                                1 -> game.fallbackHeaderImageUrl
+                                2 -> game.capsuleImageUrl
+                                else -> null
+                            }
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(140.dp)
                                     .background(SteamCard)
                             ) {
-                                AsyncImage(
-                                    model = game.headerImageUrl,
-                                    contentDescription = game.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                if (heroUrl != null) {
+                                    AsyncImage(
+                                        model = heroUrl,
+                                        contentDescription = game.name,
+                                        contentScale = ContentScale.Crop,
+                                        onError = { heroAttempt += 1 },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.SportsEsports,
+                                            contentDescription = game.name,
+                                            tint = SteamAccent.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(44.dp)
+                                        )
+                                    }
+                                }
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()

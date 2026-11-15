@@ -299,7 +299,11 @@ fun GameCardRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (game.steamPriceEur <= 0.0) {
-                    Column {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    ) {
                         Surface(
                             color = SteamNeon.copy(alpha = 0.14f),
                             shape = RoundedCornerShape(8.dp),
@@ -310,6 +314,8 @@ fun GameCardRow(
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = SteamNeon,
                                 modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                             )
@@ -318,11 +324,17 @@ fun GameCardRow(
                         Text(
                             text = "Officiell Steam-titel",
                             style = MaterialTheme.typography.labelSmall,
-                            color = SteamTextSecondary
+                            color = SteamTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 } else {
-                    Column {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -337,6 +349,8 @@ fun GameCardRow(
                                         fontFamily = JetBrainsMonoFontFamily,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 11.sp,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         color = Color(0xFF020617),
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
@@ -346,6 +360,8 @@ fun GameCardRow(
                                 text = SteamGamesCatalog.formatPrice(game.steamPriceEur, currency),
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = SteamTextSecondary,
                                 textDecoration = TextDecoration.LineThrough
                             )
@@ -354,6 +370,8 @@ fun GameCardRow(
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = SteamTextPrimary
                             )
                         }
@@ -375,13 +393,15 @@ fun GameCardRow(
                     border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.35f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
                             text = "Jämför",
                             style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            softWrap = false,
                             color = SteamAccent
                         )
                         Icon(

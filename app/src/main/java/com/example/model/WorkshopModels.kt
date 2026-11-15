@@ -38,6 +38,12 @@ data class WorkshopGameSummary(
     val headerImageUrl: String
         get() = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/header.jpg"
 
+    val fallbackHeaderImageUrl: String
+        get() = "https://cdn.akamai.steamstatic.com/steam/apps/$appId/header.jpg"
+
+    val capsuleImageUrl: String
+        get() = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/capsule_231x87.jpg"
+
     val workshopHomeUrl: String
         get() = "https://steamcommunity.com/app/$appId/workshop/"
 

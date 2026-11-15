@@ -74,6 +74,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
@@ -233,12 +234,13 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(9.dp))
                                 .background(Brush.linearGradient(listOf(SteamAccent, SteamNeon))),
                             contentAlignment = Alignment.Center
                         ) {
@@ -246,20 +248,27 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                 imageVector = Icons.Rounded.Bolt,
                                 contentDescription = null,
                                 tint = Color(0xFF020617),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "SteamPulse",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = SteamTextPrimary
+                                fontSize = 16.sp,
+                                color = SteamTextPrimary,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "& DEALS 2026",
                                 fontFamily = JetBrainsMonoFontFamily,
-                                fontSize = 10.sp,
-                                color = SteamAccent
+                                fontSize = 9.sp,
+                                color = SteamAccent,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -273,18 +282,18 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                         } else {
                             SteamBg
                         },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(9.dp),
                         border = BorderStroke(
                             1.dp,
                             if (showReleasePage || releaseState.hasUpdateAvailable) SteamNeon else SteamBorder
                         ),
                         modifier = Modifier
-                            .padding(end = 6.dp)
+                            .padding(end = 4.dp)
                             .minimumInteractiveComponentSize()
                             .testTag("open_releases_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -292,13 +301,15 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                 imageVector = Icons.Rounded.SystemUpdate,
                                 contentDescription = androidx.compose.ui.res.stringResource(R.string.release_open_button_desc),
                                 tint = if (releaseState.hasUpdateAvailable || showReleasePage) SteamNeon else SteamAccent,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = if (releaseState.hasUpdateAvailable) "Uppdatera" else "v${releaseState.currentVersionName}",
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = if (releaseState.hasUpdateAvailable || showReleasePage) SteamNeon else SteamTextPrimary
                             )
                         }
@@ -307,9 +318,9 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                     // SEK / EUR Currency Switcher
                     Surface(
                         color = SteamBg,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(9.dp),
                         border = BorderStroke(1.dp, SteamBorder),
-                        modifier = Modifier.padding(end = 4.dp)
+                        modifier = Modifier.padding(end = 2.dp)
                     ) {
                         Row(modifier = Modifier.padding(2.dp)) {
                             CurrencyMode.entries.forEach { mode ->
@@ -317,16 +328,18 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                 Surface(
                                     onClick = { pulseViewModel.setCurrency(mode) },
                                     color = if (active) SteamAccent else Color.Transparent,
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = RoundedCornerShape(7.dp),
                                     modifier = Modifier.testTag("currency_${mode.code.lowercase()}")
                                 ) {
                                     Text(
                                         text = mode.code,
                                         fontFamily = JetBrainsMonoFontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         color = if (active) Color(0xFF020617) else SteamTextSecondary,
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
                                     )
                                 }
                             }
@@ -342,7 +355,8 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.Logout,
                             contentDescription = "Logga ut",
-                            tint = SteamTextSecondary
+                            tint = SteamTextSecondary,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
