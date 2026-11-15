@@ -2,6 +2,7 @@ package com.example.data
 
 import com.example.model.WorkshopLeaderboardMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -236,5 +237,75 @@ class SteamWorkshopRepositoryTest {
             games[0].customImageUrl
         )
         assertEquals(0, games[0].rank)
+    }
+
+    @Test
+    fun parseSubscribedWorkshopItemsAndResolveProfileHelpers_workCleanly() {
+        assertEquals(
+            "https://steamcommunity.com/profiles/76561198012345678/myworkshopfiles/?browsefilter=mysubscriptions&p=1&numperpage=30",
+            SteamWorkshopRepository.buildSubscribedWorkshopUrl("76561198012345678", 1)
+        )
+        assertEquals(
+            "stalkerfan",
+            SteamWorkshopRepository.extractVanityFromInput("https://steamcommunity.com/id/stalkerfan/myworkshopfiles/")
+        )
+        assertEquals(
+            "76561198012345678",
+            SteamWorkshopRepository.parseSteamId64FromProfileResponse(
+                "<profile><steamID64>76561198012345678</steamID64><steamID><![CDATA[Test]]></steamID></profile>"
+            )
+        )
+        assertEquals(
+            "76561198012345678",
+            SteamWorkshopRepository.parseSteamId64FromProfileResponse(
+                """g_rgProfileData = {"url":"https://steamcommunity.com/id/test/","steamid":"76561198012345678"};"""
+            )
+        )
+
+        val subscribedHtml = """
+            <div class="workshopItemSubscription" id="subscription_33991122">
+              <div class="workshopItemPreviewHolder">
+                <img class="workshopItemPreviewImage" src="https://steamuserimages-a.akamaihd.net/ugc/sub_thumb.jpg" />
+              </div>
+              <div class="workshopItemSubscriptionDetails">
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=33991122">
+                  <div class="workshopItemSubscriptionName">Zone Realism Overhaul</div>
+                </a>
+                <div class="workshopItemAuthorName">by <a href="https://steamcommunity.com/id/zonemod">ZoneModder</a></div>
+              </div>
+            </div>
+        """.trimIndent()
+
+        val subs = SteamWorkshopRepository.parseWorkshopBrowseHtml(subscribedHtml, 0)
+        assertEquals(1, subs.size)
+        assertEquals("33991122", subs[0].publishedFileId)
+        assertEquals("Zone Realism Overhaul", subs[0].title)
+        assertEquals("ZoneModder", subs[0].author)
+        assertEquals("https://steamuserimages-a.akamaihd.net/ugc/sub_thumb.jpg", subs[0].previewUrl)
+    }
+
+    @Test
+    fun isPrivateSteamProfileHtml_detectsPrivacyWallsAndIgnoresPublicPages() {
+        assertTrue(
+            SteamWorkshopRepository.isPrivateSteamProfileHtml(
+                """<div class="profile_private_info">This profile is private.</div>"""
+            )
+        )
+        assertTrue(
+            SteamWorkshopRepository.isPrivateSteamProfileHtml(
+                """<p>This user's game details are private.</p>"""
+            )
+        )
+        assertTrue(
+            SteamWorkshopRepository.isPrivateSteamProfileHtml(
+                body = "<html></html>",
+                finalUrl = "https://steamcommunity.com/login/home/?goto=myworkshopfiles"
+            )
+        )
+        assertFalse(
+            SteamWorkshopRepository.isPrivateSteamProfileHtml(
+                """<div class="workshopBrowseItems"><div class="no_workshop_items">No items found</div></div>"""
+            )
+        )
     }
 }

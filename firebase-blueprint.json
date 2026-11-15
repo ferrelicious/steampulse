@@ -34,12 +34,173 @@
         }
       },
       "required": ["userId", "gameTitle", "targetPriceEur", "preferredCurrency", "createdAt", "updatedAt"]
+    },
+    "FollowedWorkshopGame": {
+      "title": "FollowedWorkshopGame",
+      "description": "A Steam game followed by the user for new Workshop mod updates.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase user UID owning this followed game."
+        },
+        "appId": {
+          "type": "integer",
+          "description": "Steam AppID of the followed game."
+        },
+        "gameName": {
+          "type": "string",
+          "description": "Display name of the followed game."
+        },
+        "developer": {
+          "type": "string",
+          "description": "Developer or publisher label."
+        },
+        "headerImageUrl": {
+          "type": "string",
+          "description": "Game thumbnail/header URL."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when followed via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "appId", "gameName", "developer", "headerImageUrl", "createdAt", "updatedAt"]
+    },
+    "FollowedWorkshopMod": {
+      "title": "FollowedWorkshopMod",
+      "description": "A Steam Workshop mod bookmarked by the user or synced from their public Steam subscriptions.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase user UID owning this followed mod."
+        },
+        "publishedFileId": {
+          "type": "string",
+          "description": "Steam Workshop PublishedFileId."
+        },
+        "appId": {
+          "type": "integer",
+          "description": "Associated Steam AppID (0 if unknown)."
+        },
+        "gameName": {
+          "type": "string",
+          "description": "Associated Steam game name."
+        },
+        "title": {
+          "type": "string",
+          "description": "Mod title."
+        },
+        "author": {
+          "type": "string",
+          "description": "Mod creator name."
+        },
+        "previewUrl": {
+          "type": "string",
+          "description": "Thumbnail image URL."
+        },
+        "itemUrl": {
+          "type": "string",
+          "description": "Steam Workshop item URL."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["BOOKMARK", "STEAM_SYNC", "BOTH"],
+          "description": "Origin of the followed mod entry."
+        },
+        "updatedEpochSec": {
+          "type": "integer",
+          "description": "Last updated epoch timestamp in seconds (0 if unknown)."
+        },
+        "subscriptions": {
+          "type": "integer",
+          "description": "Subscriber count snapshot (0 if unknown)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "publishedFileId",
+        "appId",
+        "gameName",
+        "title",
+        "author",
+        "previewUrl",
+        "itemUrl",
+        "source",
+        "updatedEpochSec",
+        "subscriptions",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SteamWorkshopSyncProfile": {
+      "title": "SteamWorkshopSyncProfile",
+      "description": "Linked Steam profile metadata for syncing public Steam Workshop subscriptions.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase user UID."
+        },
+        "steamId64": {
+          "type": "string",
+          "description": "Resolved 17-digit SteamID64."
+        },
+        "profileInput": {
+          "type": "string",
+          "description": "Original Steam profile URL or SteamID64 entered by the user."
+        },
+        "syncedCount": {
+          "type": "integer",
+          "description": "Number of subscribed mods found in the last sync."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "steamId64", "profileInput", "syncedCount", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}/watchlist/{gameId}": {
       "schema": { "$ref": "#/entities/WatchlistItem" },
       "description": "User-scoped watchlist and target price alerts keyed by gameId."
+    },
+    "/users/{userId}/followed_games/{appId}": {
+      "schema": { "$ref": "#/entities/FollowedWorkshopGame" },
+      "description": "User-scoped followed Steam games for the Workshop new mods feed."
+    },
+    "/users/{userId}/followed_mods/{publishedFileId}": {
+      "schema": { "$ref": "#/entities/FollowedWorkshopMod" },
+      "description": "User-scoped bookmarked and Steam-synced Workshop mods."
+    },
+    "/users/{userId}/workshop_sync/{syncId}": {
+      "schema": { "$ref": "#/entities/SteamWorkshopSyncProfile" },
+      "description": "User-scoped linked Steam profile sync metadata."
     }
   }
 }

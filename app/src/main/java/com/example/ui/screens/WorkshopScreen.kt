@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -87,6 +88,7 @@ import com.example.model.WorkshopGamesUiState
 import com.example.model.WorkshopLeaderboardMode
 import com.example.model.WorkshopModItem
 import com.example.model.WorkshopModsUiState
+import com.example.model.WorkshopSectionTab
 import com.example.model.WorkshopSortOrder
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
@@ -102,13 +104,13 @@ import com.example.ui.theme.SteamTextMuted
 import com.example.ui.theme.SteamTextPrimary
 import com.example.ui.theme.SteamTextSecondary
 import com.example.viewmodel.WorkshopScreenUiState
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkshopScreen(
     uiState: WorkshopScreenUiState,
+    onSelectSectionTab: (WorkshopSectionTab) -> Unit = {},
     onSelectLeaderboardMode: (WorkshopLeaderboardMode) -> Unit,
     onGameSearchChange: (String) -> Unit,
     onSubmitGameSearch: () -> Unit = {},
@@ -123,33 +125,163 @@ fun WorkshopScreen(
     onRefreshMods: () -> Unit,
     onLoadMoreMods: () -> Unit,
     onOpenModDetail: (WorkshopModItem) -> Unit,
-    onCloseModDetail: () -> Unit
+    onCloseModDetail: () -> Unit,
+    onToggleFollowGame: (WorkshopGameSummary) -> Unit = {},
+    onToggleBookmarkMod: (WorkshopModItem, String?) -> Unit = { _, _ -> },
+    onRemoveFollowedMod: (String) -> Unit = {},
+    onRefreshFollowedFeed: () -> Unit = {},
+    onOpenSteamSyncDialog: () -> Unit = {},
+    onDismissSteamSyncDialog: () -> Unit = {},
+    onSteamProfileInputChange: (String) -> Unit = {},
+    onSubmitSteamSync: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val openUrl: (String) -> Unit = { url ->
+        if (url.isNotBlank()) {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }
+        }
+    }
+
     val selectedGame = uiState.selectedGame
     if (selectedGame == null) {
-        Top100GamesDirectory(
-            uiState = uiState,
-            onSelectLeaderboardMode = onSelectLeaderboardMode,
-            onGameSearchChange = onGameSearchChange,
-            onSubmitGameSearch = onSubmitGameSearch,
-            onToggleOnlyWorkshopPowerhouses = onToggleOnlyWorkshopPowerhouses,
-            onRefreshGames = onRefreshGames,
-            onOpenGameWorkshop = onOpenGameWorkshop,
-            onOpenCustomAppId = onOpenCustomAppId
-        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            WorkshopSectionSwitcher(
+                activeTab = uiState.activeSectionTab,
+                followedBadgeCount = uiState.followedMods.size + uiState.followedGames.size,
+                onSelectTab = onSelectSectionTab
+            )
+
+            when (uiState.activeSectionTab) {
+                WorkshopSectionTab.DISCOVER -> Top100GamesDirectory(
+                    uiState = uiState,
+                    onSelectLeaderboardMode = onSelectLeaderboardMode,
+                    onGameSearchChange = onGameSearchChange,
+                    onSubmitGameSearch = onSubmitGameSearch,
+                    onToggleOnlyWorkshopPowerhouses = onToggleOnlyWorkshopPowerhouses,
+                    onRefreshGames = onRefreshGames,
+                    onOpenGameWorkshop = onOpenGameWorkshop,
+                    onOpenCustomAppId = onOpenCustomAppId
+                )
+
+                WorkshopSectionTab.FOLLOWED -> WorkshopFollowedView(
+                    uiState = uiState,
+                    onOpenGameWorkshop = onOpenGameWorkshop,
+                    onToggleFollowGame = onToggleFollowGame,
+                    onRefreshFollowedFeed = onRefreshFollowedFeed,
+                    onOpenModDetail = onOpenModDetail,
+                    onToggleBookmarkMod = onToggleBookmarkMod,
+                    onRemoveFollowedMod = onRemoveFollowedMod,
+                    onOpenSteamSyncDialog = onOpenSteamSyncDialog
+                )
+            }
+        }
     } else {
         GameWorkshopDetailPage(
             game = selectedGame,
             uiState = uiState,
+            isGameFollowed = uiState.followedGameIds.contains(selectedGame.appId),
             onBack = onCloseGameWorkshop,
+            onToggleFollowGame = { onToggleFollowGame(selectedGame) },
             onSelectSortOrder = onSelectSortOrder,
             onModSearchChange = onModSearchChange,
             onSubmitModSearch = onSubmitModSearch,
             onRefreshMods = onRefreshMods,
             onLoadMoreMods = onLoadMoreMods,
             onOpenModDetail = onOpenModDetail,
-            onCloseModDetail = onCloseModDetail
+            onToggleBookmarkMod = { mod -> onToggleBookmarkMod(mod, selectedGame.name) }
         )
+    }
+
+    val selectedMod = uiState.selectedModDetail
+    if (selectedMod != null) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val isBookmarked = uiState.bookmarkedModIds.contains(selectedMod.publishedFileId)
+        ModalBottomSheet(
+            onDismissRequest = onCloseModDetail,
+            sheetState = sheetState,
+            containerColor = SteamSurface,
+            contentColor = SteamTextPrimary
+        ) {
+            WorkshopModDetailSheetContent(
+                mod = selectedMod,
+                isLoadingDetails = uiState.isModDetailLoading,
+                isBookmarked = isBookmarked,
+                onToggleBookmark = {
+                    onToggleBookmarkMod(selectedMod, uiState.selectedGame?.name)
+                },
+                onOpenOnSteam = { openUrl(selectedMod.itemUrl) }
+            )
+        }
+    }
+
+    if (uiState.showSteamSyncDialog) {
+        SteamSyncSubscriptionsDialog(
+            input = uiState.steamProfileInput,
+            syncState = uiState.steamSyncState,
+            onInputChange = onSteamProfileInputChange,
+            onDismiss = onDismissSteamSyncDialog,
+            onConfirmSync = onSubmitSteamSync
+        )
+    }
+}
+
+@Composable
+private fun WorkshopSectionSwitcher(
+    activeTab: WorkshopSectionTab,
+    followedBadgeCount: Int,
+    onSelectTab: (WorkshopSectionTab) -> Unit
+) {
+    Surface(
+        color = SteamSurface,
+        border = BorderStroke(1.dp, SteamBorder),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            WorkshopSectionTab.entries.forEach { tab ->
+                val selected = activeTab == tab
+                val labelText = if (tab == WorkshopSectionTab.FOLLOWED && followedBadgeCount > 0) {
+                    "${tab.label} ($followedBadgeCount)"
+                } else {
+                    tab.label
+                }
+                Surface(
+                    onClick = { onSelectTab(tab) },
+                    color = if (selected) SteamAccent else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .minimumInteractiveComponentSize()
+                        .testTag("workshop_section_${tab.name.lowercase()}")
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = labelText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            color = if (selected) Color(0xFF020617) else SteamTextSecondary
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -295,7 +427,7 @@ private fun Top100GamesDirectory(
                         },
                         label = {
                             Text(
-                                text = "Mod-favoriter",
+                                text = "Workshop-spel",
                                 fontSize = 12.sp,
                                 fontWeight = if (uiState.onlyWorkshopPowerhouses) FontWeight.Bold else FontWeight.Medium
                             )
@@ -489,6 +621,7 @@ private fun Top100GamesDirectory(
                 ) { game ->
                     WorkshopGameCard(
                         game = game,
+                        isFollowed = uiState.followedGameIds.contains(game.appId),
                         onClick = { onOpenGameWorkshop(game) }
                     )
                 }
@@ -585,6 +718,7 @@ private fun Top100GamesDirectory(
                         ) { game ->
                             WorkshopGameCard(
                                 game = game,
+                                isFollowed = uiState.followedGameIds.contains(game.appId),
                                 onClick = { onOpenGameWorkshop(game) }
                             )
                         }
@@ -599,6 +733,7 @@ private fun Top100GamesDirectory(
 @Composable
 private fun WorkshopGameCard(
     game: WorkshopGameSummary,
+    isFollowed: Boolean = false,
     onClick: () -> Unit
 ) {
     var imageAttempt by remember(game.appId, game.customImageUrl) { mutableIntStateOf(0) }
@@ -726,6 +861,22 @@ private fun WorkshopGameCard(
                             color = SteamSale
                         )
                     }
+                    if (isFollowed) {
+                        Surface(
+                            color = SteamNeon.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "Följer",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
+                                color = SteamNeon,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                     if (game.isKnownWorkshopPowerhouse) {
                         Surface(
                             color = SteamAccent.copy(alpha = 0.14f),
@@ -755,19 +906,20 @@ private fun WorkshopGameCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GameWorkshopDetailPage(
     game: WorkshopGameSummary,
     uiState: WorkshopScreenUiState,
+    isGameFollowed: Boolean,
     onBack: () -> Unit,
+    onToggleFollowGame: () -> Unit,
     onSelectSortOrder: (WorkshopSortOrder) -> Unit,
     onModSearchChange: (String) -> Unit,
     onSubmitModSearch: () -> Unit,
     onRefreshMods: () -> Unit,
     onLoadMoreMods: () -> Unit,
     onOpenModDetail: (WorkshopModItem) -> Unit,
-    onCloseModDetail: () -> Unit
+    onToggleBookmarkMod: (WorkshopModItem) -> Unit
 ) {
     val context = LocalContext.current
     BackHandler(onBack = onBack)
@@ -934,21 +1086,60 @@ private fun GameWorkshopDetailPage(
                                             color = SteamTextSecondary
                                         )
                                     }
-                                    OutlinedButton(
-                                        onClick = { openUrl(game.workshopHomeUrl) },
-                                        border = BorderStroke(1.dp, SteamAccent),
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                        modifier = Modifier.minimumInteractiveComponentSize()
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
-                                            contentDescription = null,
-                                            tint = SteamAccent,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Steam", fontSize = 12.sp, color = SteamTextPrimary)
+                                        Button(
+                                            onClick = onToggleFollowGame,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isGameFollowed) SteamNeon else SteamCard,
+                                                contentColor = if (isGameFollowed) Color(0xFF020617) else SteamTextPrimary
+                                            ),
+                                            border = BorderStroke(1.dp, if (isGameFollowed) SteamNeon else SteamBorder),
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                            modifier = Modifier
+                                                .minimumInteractiveComponentSize()
+                                                .testTag("follow_game_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isGameFollowed) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(Modifier.width(5.dp))
+                                            Text(
+                                                text = if (isGameFollowed) "Följer" else "Följ spel",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { openUrl(game.workshopHomeUrl) },
+                                            border = BorderStroke(1.dp, SteamAccent),
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                            modifier = Modifier.minimumInteractiveComponentSize()
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                                contentDescription = null,
+                                                tint = SteamAccent,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(Modifier.width(5.dp))
+                                            Text(
+                                                text = "Steam",
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                color = SteamTextPrimary
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1204,7 +1395,9 @@ private fun GameWorkshopDetailPage(
                                             Box(modifier = Modifier.weight(1f)) {
                                                 WorkshopModCard(
                                                     mod = mod,
-                                                    onClick = { onOpenModDetail(mod) }
+                                                    isBookmarked = uiState.bookmarkedModIds.contains(mod.publishedFileId),
+                                                    onClick = { onOpenModDetail(mod) },
+                                                    onToggleBookmark = { onToggleBookmarkMod(mod) }
                                                 )
                                             }
                                         }
@@ -1220,7 +1413,9 @@ private fun GameWorkshopDetailPage(
                                 ) { mod ->
                                     WorkshopModCard(
                                         mod = mod,
-                                        onClick = { onOpenModDetail(mod) }
+                                        isBookmarked = uiState.bookmarkedModIds.contains(mod.publishedFileId),
+                                        onClick = { onOpenModDetail(mod) },
+                                        onToggleBookmark = { onToggleBookmarkMod(mod) }
                                     )
                                 }
                             }
@@ -1261,29 +1456,14 @@ private fun GameWorkshopDetailPage(
             }
         }
     }
-
-    val selectedMod = uiState.selectedModDetail
-    if (selectedMod != null) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = onCloseModDetail,
-            sheetState = sheetState,
-            containerColor = SteamSurface,
-            contentColor = SteamTextPrimary
-        ) {
-            WorkshopModDetailSheetContent(
-                mod = selectedMod,
-                isLoadingDetails = uiState.isModDetailLoading,
-                onOpenOnSteam = { openUrl(selectedMod.itemUrl) }
-            )
-        }
-    }
 }
 
 @Composable
 private fun WorkshopModCard(
     mod: WorkshopModItem,
-    onClick: () -> Unit
+    isBookmarked: Boolean,
+    onClick: () -> Unit,
+    onToggleBookmark: () -> Unit
 ) {
     Card(
         onClick = onClick,
@@ -1390,7 +1570,7 @@ private fun WorkshopModCard(
                     mod.updatedEpochSec?.let { epoch ->
                         if (epoch > 0L) {
                             Text(
-                                text = formatEpochDate(epoch),
+                                text = formatWorkshopEpochDate(epoch),
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontSize = 10.sp,
                                 color = SteamTextMuted
@@ -1398,6 +1578,19 @@ private fun WorkshopModCard(
                         }
                     }
                 }
+            }
+
+            IconButton(
+                onClick = onToggleBookmark,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("bookmark_mod_${mod.publishedFileId}")
+            ) {
+                Icon(
+                    imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = if (isBookmarked) "Ta bort bokmärke för ${mod.title}" else "Bokmärk ${mod.title}",
+                    tint = if (isBookmarked) SteamNeon else SteamTextSecondary
+                )
             }
         }
     }
@@ -1408,6 +1601,8 @@ private fun WorkshopModCard(
 private fun WorkshopModDetailSheetContent(
     mod: WorkshopModItem,
     isLoadingDetails: Boolean,
+    isBookmarked: Boolean,
+    onToggleBookmark: () -> Unit,
     onOpenOnSteam: () -> Unit
 ) {
     Column(
@@ -1538,6 +1733,30 @@ private fun WorkshopModDetailSheetContent(
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = SteamTextSecondary
+            )
+        }
+
+        OutlinedButton(
+            onClick = onToggleBookmark,
+            border = BorderStroke(1.dp, if (isBookmarked) SteamNeon else SteamBorder),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .minimumInteractiveComponentSize()
+                .testTag("sheet_bookmark_mod_button")
+        ) {
+            Icon(
+                imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                contentDescription = null,
+                tint = if (isBookmarked) SteamNeon else SteamTextSecondary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = if (isBookmarked) "Sparad i Mina & Följda" else "Bokmärk modd",
+                color = if (isBookmarked) SteamNeon else SteamTextPrimary,
+                fontWeight = FontWeight.SemiBold
             )
         }
 
@@ -1680,9 +1899,4 @@ private fun formatSizeMb(bytes: Long): String {
         bytes < 1024L * 1024L -> String.format(Locale.forLanguageTag("sv-SE"), "%.0f KB", bytes / 1024.0)
         else -> String.format(Locale.forLanguageTag("sv-SE"), "%.1f MB", bytes / (1024.0 * 1024.0))
     }
-}
-
-private fun formatEpochDate(epochSec: Long): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.forLanguageTag("sv-SE"))
-    return sdf.format(Date(epochSec * 1000L))
 }

@@ -39,6 +39,77 @@ service cloud.firestore {
              data.updatedAt <= request.time;
     }
 
+    function isValidFollowedWorkshopGame(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.appId is int &&
+             data.appId > 0 &&
+             data.appId <= 100000000 &&
+             data.gameName is string &&
+             data.gameName.size() >= 1 &&
+             data.gameName.size() <= 160 &&
+             data.developer is string &&
+             data.developer.size() <= 120 &&
+             data.headerImageUrl is string &&
+             data.headerImageUrl.size() <= 500 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidFollowedWorkshopMod(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.publishedFileId is string &&
+             data.publishedFileId.size() >= 1 &&
+             data.publishedFileId.size() <= 64 &&
+             data.appId is int &&
+             data.appId >= 0 &&
+             data.appId <= 100000000 &&
+             data.gameName is string &&
+             data.gameName.size() <= 160 &&
+             data.title is string &&
+             data.title.size() >= 1 &&
+             data.title.size() <= 240 &&
+             data.author is string &&
+             data.author.size() <= 120 &&
+             data.previewUrl is string &&
+             data.previewUrl.size() <= 600 &&
+             data.itemUrl is string &&
+             data.itemUrl.size() >= 1 &&
+             data.itemUrl.size() <= 400 &&
+             data.source in ['BOOKMARK', 'STEAM_SYNC', 'BOTH'] &&
+             data.updatedEpochSec is int &&
+             data.updatedEpochSec >= 0 &&
+             data.subscriptions is int &&
+             data.subscriptions >= 0 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidWorkshopSyncProfile(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.steamId64 is string &&
+             data.steamId64.size() >= 5 &&
+             data.steamId64.size() <= 32 &&
+             data.profileInput is string &&
+             data.profileInput.size() >= 1 &&
+             data.profileInput.size() <= 240 &&
+             data.syncedCount is int &&
+             data.syncedCount >= 0 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
     match /users/{userId}/watchlist/{gameId} {
       allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(gameId);
       allow list: if isSignedIn() && request.auth.uid == userId;
@@ -61,6 +132,80 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly(['targetPriceEur', 'preferredCurrency', 'gameTitle', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && isValidId(gameId) && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/followed_games/{appId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(appId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(appId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(['userId', 'appId', 'gameName', 'developer', 'headerImageUrl', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'appId', 'gameName', 'developer', 'headerImageUrl', 'createdAt', 'updatedAt']) &&
+                       isValidFollowedWorkshopGame(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(appId) &&
+                       request.auth.uid == userId &&
+                       isValidFollowedWorkshopGame(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().appId == existing().appId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['gameName', 'developer', 'headerImageUrl', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && isValidId(appId) && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/followed_mods/{publishedFileId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(publishedFileId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(publishedFileId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(['userId', 'publishedFileId', 'appId', 'gameName', 'title', 'author', 'previewUrl', 'itemUrl', 'source', 'updatedEpochSec', 'subscriptions', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'publishedFileId', 'appId', 'gameName', 'title', 'author', 'previewUrl', 'itemUrl', 'source', 'updatedEpochSec', 'subscriptions', 'createdAt', 'updatedAt']) &&
+                       isValidFollowedWorkshopMod(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(publishedFileId) &&
+                       request.auth.uid == userId &&
+                       isValidFollowedWorkshopMod(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().publishedFileId == existing().publishedFileId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['appId', 'gameName', 'title', 'author', 'previewUrl', 'itemUrl', 'source', 'updatedEpochSec', 'subscriptions', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && isValidId(publishedFileId) && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/workshop_sync/{syncId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(syncId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(syncId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll(['userId', 'steamId64', 'profileInput', 'syncedCount', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'steamId64', 'profileInput', 'syncedCount', 'createdAt', 'updatedAt']) &&
+                       isValidWorkshopSyncProfile(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(syncId) &&
+                       request.auth.uid == userId &&
+                       isValidWorkshopSyncProfile(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['steamId64', 'profileInput', 'syncedCount', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && isValidId(syncId) && request.auth.uid == userId;
     }
   }
 }

@@ -169,3 +169,108 @@ test("Shadow update with ghost field or invalid currency is rejected", async () 
       })
   );
 });
+
+test("Followed games & mods: owner CRUD succeeds, unauthenticated and cross-user denied", async () => {
+  const ts = pastDate();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+
+  const gameRef = aliceDb
+    .collection("users")
+    .doc(ALICE_UID)
+    .collection("followed_games")
+    .doc("1643320");
+
+  await assertFails(
+    unauthDb.collection("users").doc(ALICE_UID).collection("followed_games").get()
+  );
+
+  await assertSucceeds(
+    gameRef.set({
+      userId: ALICE_UID,
+      appId: 1643320,
+      gameName: "S.T.A.L.K.E.R. 2: Heart of Chornobyl",
+      developer: "GSC Game World",
+      headerImageUrl: "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1643320/header.jpg",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("followed_games").get()
+  );
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("followed_games").doc("1643320").delete()
+  );
+
+  const modRef = aliceDb
+    .collection("users")
+    .doc(ALICE_UID)
+    .collection("followed_mods")
+    .doc("2009463077");
+
+  await assertSucceeds(
+    modRef.set({
+      userId: ALICE_UID,
+      publishedFileId: "2009463077",
+      appId: 1643320,
+      gameName: "S.T.A.L.K.E.R. 2: Heart of Chornobyl",
+      title: "Zone Overhaul",
+      author: "StalkerDev",
+      previewUrl: "https://steamuserimages-a.akamaihd.net/ugc/mod.jpg",
+      itemUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=2009463077",
+      source: "BOOKMARK",
+      updatedEpochSec: 1730000000,
+      subscriptions: 1200,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    modRef.update({
+      source: "BOTH",
+      subscriptions: 1400,
+      updatedAt: pastDate(),
+    })
+  );
+
+  // Reject invalid source or ghost field
+  await assertFails(
+    modRef.update({
+      source: "INVALID_SOURCE",
+      updatedAt: pastDate(),
+    })
+  );
+
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("followed_mods").get()
+  );
+
+  const syncRef = aliceDb
+    .collection("users")
+    .doc(ALICE_UID)
+    .collection("workshop_sync")
+    .doc("steam");
+
+  await assertSucceeds(
+    syncRef.set({
+      userId: ALICE_UID,
+      steamId64: "76561198000000000",
+      profileInput: "https://steamcommunity.com/profiles/76561198000000000",
+      syncedCount: 5,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("workshop_sync").doc("steam").get()
+  );
+
+  await assertSucceeds(gameRef.delete());
+  await assertSucceeds(modRef.delete());
+  await assertSucceeds(syncRef.delete());
+});

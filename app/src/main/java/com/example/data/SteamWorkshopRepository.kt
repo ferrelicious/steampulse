@@ -1,12 +1,20 @@
 package com.example.data
 
 import android.text.Html
+import com.example.model.FollowedFeedModItem
+import com.example.model.FollowedWorkshopGame
+import com.example.model.FollowedWorkshopMod
+import com.example.model.WorkshopFollowSource
 import com.example.model.WorkshopGameSummary
 import com.example.model.WorkshopLeaderboardMode
 import com.example.model.WorkshopModItem
 import com.example.model.WorkshopModsFetchResult
 import com.example.model.WorkshopSortOrder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -15,7 +23,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+
+class SteamProfilePrivateException(message: String) : IOException(message)
 
 class SteamWorkshopRepository(
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -23,6 +34,8 @@ class SteamWorkshopRepository(
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 ) {
+
+    private val appNameCache = ConcurrentHashMap<Int, String>()
 
     private data class HttpFetchOutcome(
         val requestedUrl: String,
@@ -362,11 +375,201 @@ class SteamWorkshopRepository(
         }.getOrDefault(emptyMap())
     }
 
+    suspend fun resolveSteamId64(rawInput: String): String = withContext(Dispatchers.IO) {
+        val trimmed = rawInput.trim()
+        if (trimmed.isBlank()) {
+            throw IOException("Ange ditt SteamID64 eller din Steam-profil-URL.")
+        }
+
+        if (STEAM_ID64_EXACT_REGEX.matches(trimmed)) {
+            return@withContext trimmed
+        }
+
+        PROFILE_ID64_URL_REGEX.find(trimmed)?.groupValues?.getOrNull(1)?.let { extracted ->
+            return@withContext extracted
+        }
+
+        val vanity = extractVanityFromInput(trimmed)
+            ?: throw IOException("Ogiltigt format. Ange SteamID64 (17 siffror) eller länk som steamcommunity.com/id/dittnamn.")
+
+        val encodedVanity = URLEncoder.encode(vanity, "UTF-8")
+        val xmlOutcome = executeSteamGet("https://steamcommunity.com/id/$encodedVanity/?xml=1")
+        if (xmlOutcome.body.contains("The specified profile could not be found", ignoreCase = true)) {
+            throw IOException("Hittade ingen Steam-profil för \"$vanity\". Kontrollera länken eller SteamID64.")
+        }
+        parseSteamId64FromProfileResponse(xmlOutcome.body)?.let { return@withContext it }
+
+        val htmlOutcome = executeSteamGet("https://steamcommunity.com/id/$encodedVanity/")
+        if (htmlOutcome.body.contains("The specified profile could not be found", ignoreCase = true)) {
+            throw IOException("Hittade ingen Steam-profil för \"$vanity\". Kontrollera länken eller SteamID64.")
+        }
+        if (isPrivateSteamProfileHtml(htmlOutcome.body, htmlOutcome.finalUrl)) {
+            throw SteamProfilePrivateException(PRIVATE_PROFILE_ERROR_MSG)
+        }
+        parseSteamId64FromProfileResponse(htmlOutcome.body)?.let { return@withContext it }
+
+        throw IOException("Kunde inte läsa SteamID64 för \"$vanity\". Kontrollera att profilen är offentlig eller ange SteamID64 direkt.")
+    }
+
+    suspend fun fetchSubscribedWorkshopMods(
+        rawProfileInput: String
+    ): Pair<String, List<FollowedWorkshopMod>> = withContext(Dispatchers.IO) {
+        val steamId64 = resolveSteamId64(rawProfileInput)
+        val collectedRaw = linkedMapOf<String, WorkshopModItem>()
+
+        for (page in 1..3) {
+            val url = buildSubscribedWorkshopUrl(steamId64, page)
+            val outcome = executeSteamGet(url)
+            if (isPrivateSteamProfileHtml(outcome.body, outcome.finalUrl)) {
+                throw SteamProfilePrivateException(PRIVATE_PROFILE_ERROR_MSG)
+            }
+            val parsed = parseWorkshopResponseBody(outcome.body, appId = 0)
+            if (parsed.isEmpty()) break
+            parsed.forEach { item ->
+                if (!collectedRaw.containsKey(item.publishedFileId)) {
+                    collectedRaw[item.publishedFileId] = item
+                }
+            }
+            val hasNextPage = outcome.body.contains("p=${page + 1}", ignoreCase = true) ||
+                outcome.body.contains("ShowPage( ${page + 1}", ignoreCase = true)
+            if (!hasNextPage) break
+        }
+
+        if (collectedRaw.isEmpty()) {
+            return@withContext steamId64 to emptyList()
+        }
+
+        val allIds = collectedRaw.keys.toList()
+        val detailsMap = mutableMapOf<String, WorkshopModItem>()
+        allIds.chunked(50).forEach { chunk ->
+            detailsMap.putAll(fetchPublishedFileDetailsSafe(chunk))
+        }
+
+        val enrichedMods = collectedRaw.values.map { raw ->
+            val detail = detailsMap[raw.publishedFileId]
+            if (detail != null) {
+                raw.copy(
+                    appId = detail.appId.takeIf { it > 0 } ?: raw.appId,
+                    title = detail.title.ifBlank { raw.title },
+                    previewUrl = detail.previewUrl.ifBlank { raw.previewUrl },
+                    subscriptions = detail.subscriptions ?: raw.subscriptions,
+                    updatedEpochSec = detail.updatedEpochSec ?: raw.updatedEpochSec
+                )
+            } else {
+                raw
+            }
+        }
+
+        val distinctAppIds = enrichedMods.map { it.appId }.filter { it > 0 }.distinct()
+        val appNames = fetchAppNamesMap(distinctAppIds)
+
+        val firestoreMods = enrichedMods.map { item ->
+            val gameName = appNames[item.appId].orEmpty()
+                .ifBlank { if (item.appId > 0) "Steam App #${item.appId}" else "Steam Workshop" }
+            FollowedWorkshopMod(
+                id = item.publishedFileId,
+                publishedFileId = item.publishedFileId,
+                appId = item.appId,
+                gameName = gameName,
+                title = item.title,
+                author = item.author,
+                previewUrl = item.previewUrl,
+                itemUrl = item.itemUrl,
+                source = WorkshopFollowSource.STEAM_SYNC,
+                updatedEpochSec = item.updatedEpochSec ?: 0L,
+                subscriptions = item.subscriptions ?: 0L
+            )
+        }.sortedByDescending { it.updatedEpochSec }
+
+        steamId64 to firestoreMods
+    }
+
+    suspend fun fetchLatestModsForGames(
+        games: List<FollowedWorkshopGame>
+    ): List<FollowedFeedModItem> = coroutineScope {
+        if (games.isEmpty()) return@coroutineScope emptyList()
+        val targetGames = games.take(6)
+        val deferred = targetGames.map { game ->
+            async(Dispatchers.IO) {
+                try {
+                    val result = fetchWorkshopMods(
+                        appId = game.appId,
+                        sortOrder = WorkshopSortOrder.MOST_RECENT,
+                        searchQuery = "",
+                        page = 1
+                    )
+                    result.mods.take(5).map { mod ->
+                        FollowedFeedModItem(
+                            mod = mod,
+                            gameName = game.gameName.ifBlank { "App #${game.appId}" }
+                        )
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
+        deferred.awaitAll()
+            .flatten()
+            .distinctBy { it.mod.publishedFileId }
+            .sortedByDescending { it.mod.updatedEpochSec ?: 0L }
+    }
+
+    private suspend fun fetchAppNamesMap(appIds: List<Int>): Map<Int, String> = coroutineScope {
+        if (appIds.isEmpty()) return@coroutineScope emptyMap()
+        val result = mutableMapOf<Int, String>()
+        val missing = mutableListOf<Int>()
+        appIds.forEach { id ->
+            val cached = appNameCache[id]
+            if (cached != null) {
+                result[id] = cached
+            } else {
+                missing.add(id)
+            }
+        }
+
+        missing.take(20).map { appId ->
+            async(Dispatchers.IO) {
+                runCatching {
+                    val req = Request.Builder()
+                        .url("https://store.steampowered.com/api/appdetails?appids=$appId&filters=basic")
+                        .header("User-Agent", DESKTOP_USER_AGENT)
+                        .header("Accept", "application/json")
+                        .get()
+                        .build()
+                    val body = httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.string().orEmpty() else ""
+                    }
+                    if (body.isNotBlank()) {
+                        val root = JSONObject(body)
+                        val appObj = root.optJSONObject(appId.toString())
+                        if (appObj?.optBoolean("success", false) == true) {
+                            val name = appObj.optJSONObject("data")?.optString("name", "").orEmpty().trim()
+                            if (name.isNotBlank()) {
+                                appNameCache[appId] = name
+                                return@runCatching appId to name
+                            }
+                        }
+                    }
+                    null
+                }.getOrNull()
+            }
+        }.awaitAll().filterNotNull().forEach { (id, name) ->
+            result[id] = name
+        }
+
+        result
+    }
+
     companion object {
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         const val STEAM_AGE_BYPASS_COOKIE =
             "birthtime=0; lastagecheckage=1-0-1990; wants_mature_content=1"
+        private const val PRIVATE_PROFILE_ERROR_MSG =
+            "Din Steam-profil eller dina Speldetaljer (Game Details) är privata. Ställ in både Profil och Speldetaljer till Offentlig på Steam för att kunna synka prenumerationer."
 
         val KNOWN_WORKSHOP_APP_IDS: Set<Int> = setOf(
             4000,    // Garry's Mod
@@ -418,22 +621,33 @@ class SteamWorkshopRepository(
             1794680, // Vampire Survivors
             1091500, // Cyberpunk 2077
             413150,  // Stardew Valley
-            1222140  // Detroit / etc. fallback
+            1643320, // S.T.A.L.K.E.R. 2: Heart of Chornobyl
+            1086940, // Baldur's Gate 3
+            1144200, // Ready or Not
+            362890,  // Black Mesa
+            435150,  // Divinity: Original Sin 2
+            976730   // Halo: The Master Chief Collection
         )
 
+        private val STEAM_ID64_EXACT_REGEX = Regex("""^\d{17}$""")
+        private val PROFILE_ID64_URL_REGEX = Regex("""steamcommunity\.com/profiles/(\d{17})""", RegexOption.IGNORE_CASE)
+        private val VANITY_URL_REGEX = Regex("""steamcommunity\.com/id/([^/?#]+)""", RegexOption.IGNORE_CASE)
+        private val XML_STEAM_ID64_REGEX = Regex("""<steamID64>(\d{17})</steamID64>""", RegexOption.IGNORE_CASE)
+        private val JSON_STEAM_ID64_REGEX = Regex(""""steamid"\s*:\s*"(\d{17})"""", RegexOption.IGNORE_CASE)
+
         private val WORKSHOP_CONTAINER_SPLIT_REGEX = Regex(
-            """<(?:div|tr|li|article)\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopItem|workshopBrowseRow)\b[^'"]*['"][^>]*>""",
+            """<(?:div|tr|li|article)\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopItem|workshopBrowseRow|workshopItemSubscription)\b[^'"]*['"][^>]*>""",
             RegexOption.IGNORE_CASE
         )
         private val FILE_ID_REGEX = Regex("""data-publishedfileid\s*=\s*['"](\d+)['"]""", RegexOption.IGNORE_CASE)
-        private val SHAREDFILE_DOM_ID_REGEX = Regex("""\bid\s*=\s*['"]sharedfile_(\d+)['"]""", RegexOption.IGNORE_CASE)
+        private val SHAREDFILE_DOM_ID_REGEX = Regex("""\bid\s*=\s*['"](?:sharedfile|subscription)_(\d+)['"]""", RegexOption.IGNORE_CASE)
         private val LINK_ID_REGEX = Regex("""sharedfiles/filedetails/\?(?:[^"'\s>]*&)?id=(\d+)""", RegexOption.IGNORE_CASE)
         private val BIND_HOVER_REGEX = Regex(
             """SharedFileBindMouseHover\s*\(\s*['"]sharedfile_(\d+)['"]\s*,\s*(?:true|false)\s*,\s*(\{.*?\})\s*\)""",
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         private val TITLE_REGEX = Regex(
-            """<(div|span|a|h[1-6])\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopItemTitle|workshopBrowseRowTitle)\b[^'"]*['"][^>]*>(.*?)</\1>""",
+            """<(div|span|a|h[1-6])\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopItemTitle|workshopBrowseRowTitle|workshopItemSubscriptionName)\b[^'"]*['"][^>]*>(.*?)</\1>""",
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         private val AUTHOR_REGEX = Regex(
@@ -468,6 +682,44 @@ class SteamWorkshopRepository(
         private val ANY_IMG_TAG_REGEX = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
         private val DETAIL_DESC_REGEX = Regex("""id="highlightContent"[^>]*>(.*?)</div>\s*</div>""", RegexOption.DOT_MATCHES_ALL)
         private val SUBSCRIBERS_STAT_REGEX = Regex("""<tr>\s*<td>([\d, ]+)</td>\s*<td>\s*Current Subscribers""", RegexOption.IGNORE_CASE)
+
+        fun buildSubscribedWorkshopUrl(steamId64: String, page: Int = 1): String {
+            return "https://steamcommunity.com/profiles/$steamId64/myworkshopfiles/?browsefilter=mysubscriptions&p=$page&numperpage=30"
+        }
+
+        fun extractVanityFromInput(rawInput: String): String? {
+            val trimmed = rawInput.trim()
+            if (trimmed.isBlank()) return null
+            VANITY_URL_REGEX.find(trimmed)?.groupValues?.getOrNull(1)?.let { return it }
+            if (!trimmed.contains('/') && !trimmed.contains('.') && !trimmed.all { it.isDigit() }) {
+                return trimmed
+            }
+            return null
+        }
+
+        fun parseSteamId64FromProfileResponse(body: String): String? {
+            if (body.isBlank()) return null
+            XML_STEAM_ID64_REGEX.find(body)?.groupValues?.getOrNull(1)?.let { return it }
+            JSON_STEAM_ID64_REGEX.find(body)?.groupValues?.getOrNull(1)?.let { return it }
+            return null
+        }
+
+        fun isPrivateSteamProfileHtml(body: String, finalUrl: String = ""): Boolean {
+            if (finalUrl.contains("openid/login", ignoreCase = true) ||
+                finalUrl.contains("/login/home", ignoreCase = true)
+            ) {
+                return true
+            }
+            val lower = body.lowercase()
+            return lower.contains("profile_private_info") ||
+                lower.contains("this profile is private") ||
+                lower.contains("this user's profile is private") ||
+                lower.contains("game details are private") ||
+                lower.contains("game details are set to private") ||
+                lower.contains("den här profilen är privat") ||
+                lower.contains("you must be logged in to view") ||
+                lower.contains("action=\"https://steamcommunity.com/login/home")
+        }
 
         fun buildBrowseCandidateUrls(
             appId: Int,

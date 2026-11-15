@@ -87,7 +87,9 @@ import com.example.auth.authStateFlow
 import com.example.auth.signOut
 import com.example.data.GitHubReleaseRepository
 import com.example.data.SteamGamesCatalog
+import com.example.data.SteamWorkshopRepository
 import com.example.data.WatchlistRepository
+import com.example.data.WorkshopFollowRepository
 import com.example.firebase.configureAppCheck
 import com.example.model.CurrencyMode
 import com.example.ui.screens.AiChatScreen
@@ -117,6 +119,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 
 enum class AppTab(
     val label: String,
@@ -192,7 +195,21 @@ private fun AuthenticatedAppShell(currentUserId: String) {
             }
         }
     )
-    val workshopViewModel: WorkshopViewModel = viewModel(key = "workshop")
+    val workshopViewModel: WorkshopViewModel = viewModel(
+        key = "workshop_$currentUserId",
+        factory = viewModelFactory {
+            initializer {
+                val app = checkNotNull(this[APPLICATION_KEY])
+                val databaseId = app.getString(R.string.firestore_database_id)
+                val db = FirebaseFirestore.getInstance(databaseId)
+                WorkshopViewModel(
+                    repository = SteamWorkshopRepository(),
+                    followRepository = WorkshopFollowRepository(db),
+                    userId = currentUserId
+                )
+            }
+        }
+    )
 
     val uiState by pulseViewModel.uiState.collectAsStateWithLifecycle()
     val watchlistState by pulseViewModel.watchlistState.collectAsStateWithLifecycle()
@@ -205,9 +222,16 @@ private fun AuthenticatedAppShell(currentUserId: String) {
     var pendingAiPrompt by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(Unit) {
-        pulseViewModel.toastEvents.collect { msg ->
-            snackbarHostState.showSnackbar(msg)
+    LaunchedEffect(pulseViewModel, workshopViewModel) {
+        launch {
+            pulseViewModel.toastEvents.collect { msg ->
+                snackbarHostState.showSnackbar(msg)
+            }
+        }
+        launch {
+            workshopViewModel.toastEvents.collect { msg ->
+                snackbarHostState.showSnackbar(msg)
+            }
         }
     }
 
@@ -494,6 +518,7 @@ private fun AuthenticatedAppShell(currentUserId: String) {
 
                                 AppTab.WORKSHOP -> WorkshopScreen(
                                     uiState = workshopState,
+                                    onSelectSectionTab = workshopViewModel::selectSectionTab,
                                     onSelectLeaderboardMode = workshopViewModel::selectLeaderboardMode,
                                     onGameSearchChange = workshopViewModel::updateGameSearchQuery,
                                     onSubmitGameSearch = workshopViewModel::submitGameSearch,
@@ -508,7 +533,15 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                     onRefreshMods = workshopViewModel::refreshMods,
                                     onLoadMoreMods = workshopViewModel::loadMoreMods,
                                     onOpenModDetail = workshopViewModel::openModDetail,
-                                    onCloseModDetail = workshopViewModel::closeModDetail
+                                    onCloseModDetail = workshopViewModel::closeModDetail,
+                                    onToggleFollowGame = workshopViewModel::toggleFollowGame,
+                                    onToggleBookmarkMod = workshopViewModel::toggleBookmarkMod,
+                                    onRemoveFollowedMod = workshopViewModel::removeFollowedMod,
+                                    onRefreshFollowedFeed = { workshopViewModel.refreshFollowedGamesFeed() },
+                                    onOpenSteamSyncDialog = workshopViewModel::openSteamSyncDialog,
+                                    onDismissSteamSyncDialog = workshopViewModel::dismissSteamSyncDialog,
+                                    onSteamProfileInputChange = workshopViewModel::updateSteamProfileInput,
+                                    onSubmitSteamSync = workshopViewModel::syncSteamSubscriptions
                                 )
 
                                 AppTab.WATCHLIST -> WatchlistScreen(
