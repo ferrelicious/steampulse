@@ -2,14 +2,14 @@ name: SteamPulse GitHub Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag (e.g. v1.0.0)'
-        required: true
-        default: 'v1.0.0'
+        description: 'Release tag (lämna tomt för automatisk v1.0.<run_number>)'
+        required: false
+        default: ''
       prerelease:
         description: 'Markera som Pre-release'
         required: false
@@ -22,6 +22,8 @@ jobs:
   build_and_release:
     name: Build APK & Publish Release Page
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -120,14 +122,21 @@ jobs:
           $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -n 1)/apksigner verify --print-certs "$APK_FILE" | grep -E "SHA-1|SHA-256"
           echo "==============================================="
 
-      - name: Resolve release tag
+      - name: Resolve unique release tag
         id: meta
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "TAG=${{ github.event.inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          INPUT_TAG="${{ github.event.inputs.tag_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
           else
-            echo "TAG=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            BASE_TAG="v1.0.${{ github.run_number }}"
+            TAG="$BASE_TAG"
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              TAG="${BASE_TAG}.$(date -u +%Y%m%d%H%M%S)"
+            fi
           fi
+          echo "Resolved release tag: $TAG"
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release Page
         uses: softprops/action-gh-release@v2
