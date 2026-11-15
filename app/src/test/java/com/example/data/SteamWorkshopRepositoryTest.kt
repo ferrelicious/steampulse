@@ -84,4 +84,41 @@ class SteamWorkshopRepositoryTest {
         assertEquals("Brrainz", items[0].author)
         assertEquals("https://steamuserimages-a.akamaihd.net/ugc/123/preview.jpg", items[0].previewUrl)
     }
+
+    @Test
+    fun parseWorkshopBrowseHtml_handlesIdBeforeClassAndSrcBeforeClass() {
+        val sampleHtml = """
+            <div id="sharedfile_987654" class="workshopItem ">
+              <div class="workshopItemPreviewHolder">
+                <img src="https://images.steamusercontent.com/ugc/987/thumb.jpg" class="workshopItemPreviewImage aspectratio_16x9" />
+              </div>
+              <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=987654">
+                <div class="workshopItemTitle">Mirage Smoke Practice</div>
+              </a>
+              <div class="workshopItemAuthor">By <a href="https://steamcommunity.com/id/mapper">Yprac</a></div>
+            </div>
+        """.trimIndent()
+
+        val items = SteamWorkshopRepository.parseWorkshopBrowseHtml(sampleHtml, 730)
+        assertEquals(1, items.size)
+        assertEquals("987654", items[0].publishedFileId)
+        assertEquals("Mirage Smoke Practice", items[0].title)
+        assertEquals("Yprac", items[0].author)
+        assertEquals("https://images.steamusercontent.com/ugc/987/thumb.jpg", items[0].previewUrl)
+    }
+
+    @Test
+    fun buildBrowseCandidateUrls_startsWithoutForcedSectionAndIncludesFallbacks() {
+        val urls = SteamWorkshopRepository.buildBrowseCandidateUrls(
+            appId = 730,
+            sortOrder = com.example.model.WorkshopSortOrder.MOST_SUBSCRIBED,
+            searchQuery = "",
+            page = 1
+        )
+        assertTrue(urls[0].contains("browsesort=totalsubscribers"))
+        assertTrue(!urls[0].contains("section="))
+        assertTrue(urls.any { it.contains("section=readytouseitems") })
+        assertTrue(urls.any { it.contains("section=mtxitems") })
+        assertTrue(urls.any { it.endsWith("/app/730/workshop/") })
+    }
 }

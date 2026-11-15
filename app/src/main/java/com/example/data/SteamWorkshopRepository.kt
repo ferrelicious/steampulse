@@ -53,39 +53,36 @@ class SteamWorkshopRepository(
         searchQuery: String,
         page: Int
     ): Pair<List<WorkshopModItem>, Boolean> = withContext(Dispatchers.IO) {
-        val encodedQuery = URLEncoder.encode(searchQuery.trim(), "UTF-8")
-        val urlBuilder = StringBuilder(
-            "https://steamcommunity.com/workshop/browse/?appid=$appId" +
-                "&browsesort=${sortOrder.browseSort}" +
-                "&section=readytouseitems" +
-                "&actualsort=${sortOrder.browseSort}" +
-                "&days=${sortOrder.daysParam}" +
-                "&p=$page"
+        val candidateUrls = buildBrowseCandidateUrls(
+            appId = appId,
+            sortOrder = sortOrder,
+            searchQuery = searchQuery,
+            page = page
         )
-        if (encodedQuery.isNotEmpty()) {
-            urlBuilder.append("&searchtext=").append(encodedQuery)
-        }
 
-        val request = Request.Builder()
-            .url(urlBuilder.toString())
-            .header("User-Agent", DESKTOP_USER_AGENT)
-            .header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8")
-            .get()
-            .build()
+        var lastHtml = ""
+        var rawItems = emptyList<WorkshopModItem>()
+        var lastError: IOException? = null
 
-        val html = try {
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IOException("Steam Workshop svarade med HTTP ${response.code}")
+        for (url in candidateUrls) {
+            try {
+                val html = executeSteamGet(url)
+                lastHtml = html
+                val parsed = parseWorkshopBrowseHtml(html, appId)
+                if (parsed.isNotEmpty()) {
+                    rawItems = parsed
+                    break
                 }
-                response.body?.string().orEmpty()
+            } catch (e: IOException) {
+                lastError = e
             }
-        } catch (e: IOException) {
-            throw IOException("Kunde inte ladda Steam Workshop: ${e.localizedMessage ?: "nätverksfel"}", e)
         }
 
-        val rawItems = parseWorkshopBrowseHtml(html, appId)
-        val hasNextPage = html.contains("p=${page + 1}", ignoreCase = true) ||
+        if (rawItems.isEmpty() && lastError != null && lastHtml.isEmpty()) {
+            throw lastError
+        }
+
+        val hasNextPage = lastHtml.contains("p=${page + 1}", ignoreCase = true) ||
             rawItems.size >= 24
 
         if (rawItems.isEmpty()) {
@@ -113,6 +110,28 @@ class SteamWorkshopRepository(
         }
 
         enriched to hasNextPage
+    }
+
+    private fun executeSteamGet(url: String): String {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", DESKTOP_USER_AGENT)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8")
+            .header("Cookie", STEAM_AGE_BYPASS_COOKIE)
+            .get()
+            .build()
+
+        return try {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Steam Workshop svarade med HTTP ${response.code}")
+                }
+                response.body?.string().orEmpty()
+            }
+        } catch (e: IOException) {
+            throw IOException("Kunde inte ladda Steam Workshop: ${e.localizedMessage ?: "nätverksfel"}", e)
+        }
     }
 
     suspend fun fetchModDetails(item: WorkshopModItem): WorkshopModItem = withContext(Dispatchers.IO) {
@@ -226,7 +245,9 @@ class SteamWorkshopRepository(
 
     companion object {
         private const val DESKTOP_USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        private const val STEAM_AGE_BYPASS_COOKIE =
+            "wants_mature_content=1; birthtime=568022401; lastagecheckage=1-0-1988"
 
         val KNOWN_WORKSHOP_APP_IDS: Set<Int> = setOf(
             4000,    // Garry's Mod
@@ -281,15 +302,76 @@ class SteamWorkshopRepository(
             1222140  // Detroit / etc. fallback
         )
 
-        private val WORKSHOP_ITEM_SPLIT_REGEX = Regex("""<div class="workshopItem"[^>]*>""")
+        private val WORKSHOP_ITEM_SPLIT_REGEX = Regex(
+            """<div\b[^>]*class="[^"]*\bworkshopItem\b[^"]*"[^>]*>""",
+            RegexOption.IGNORE_CASE
+        )
         private val FILE_ID_REGEX = Regex("""data-publishedfileid="(\d+)"""")
         private val LINK_ID_REGEX = Regex("""sharedfiles/filedetails/\?id=(\d+)""")
-        private val TITLE_REGEX = Regex("""<div class="workshopItemTitle[^"]*">(.*?)</div>""", RegexOption.DOT_MATCHES_ALL)
-        private val AUTHOR_REGEX = Regex("""<div class="workshopItemAuthorName[^"]*">.*?<a[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
-        private val PREVIEW_IMG_REGEX = Regex("""class="workshopItemPreviewImage[^"]*"[^>]*src="([^"]+)"""")
-        private val RATING_IMG_REGEX = Regex("""class="fileRating"[^>]*src="([^"]+)"""")
+        private val TITLE_REGEX = Regex(
+            """<div\b[^>]*class="[^"]*\bworkshopItemTitle\b[^"]*"[^>]*>(.*?)</div>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
+        private val AUTHOR_REGEX = Regex(
+            """<div\b[^>]*class="[^"]*\bworkshopItemAuthor(?:Name)?\b[^"]*"[^>]*>(.*?)</div>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
+        private val ANCHOR_TEXT_REGEX = Regex("""<a\b[^>]*>(.*?)</a>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+        private val PREVIEW_IMG_TAG_REGEX = Regex(
+            """<img\b[^>]*class="[^"]*\bworkshopItemPreviewImage\b[^"]*"[^>]*>""",
+            RegexOption.IGNORE_CASE
+        )
+        private val RATING_IMG_TAG_REGEX = Regex(
+            """<img\b[^>]*class="[^"]*\bfileRating\b[^"]*"[^>]*>""",
+            RegexOption.IGNORE_CASE
+        )
+        private val IMG_SRC_ATTR_REGEX = Regex("""\bsrc="([^"]+)"""", RegexOption.IGNORE_CASE)
+        private val HUB_LINK_FALLBACK_REGEX = Regex(
+            """<a\b[^>]*href="https?://steamcommunity\.com/sharedfiles/filedetails/\?id=(\d+)[^"]*"[^>]*>(.*?)</a>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
+        private val ANY_IMG_TAG_REGEX = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
         private val DETAIL_DESC_REGEX = Regex("""id="highlightContent"[^>]*>(.*?)</div>\s*</div>""", RegexOption.DOT_MATCHES_ALL)
         private val SUBSCRIBERS_STAT_REGEX = Regex("""<tr>\s*<td>([\d, ]+)</td>\s*<td>\s*Current Subscribers""", RegexOption.IGNORE_CASE)
+
+        fun buildBrowseCandidateUrls(
+            appId: Int,
+            sortOrder: WorkshopSortOrder,
+            searchQuery: String,
+            page: Int
+        ): List<String> {
+            val encodedQuery = URLEncoder.encode(searchQuery.trim(), "UTF-8")
+            fun makeUrl(section: String?): String {
+                return buildString {
+                    append("https://steamcommunity.com/workshop/browse/?appid=").append(appId)
+                    append("&browsesort=").append(sortOrder.browseSort)
+                    if (!section.isNullOrBlank()) {
+                        append("&section=").append(section)
+                    }
+                    append("&actualsort=").append(sortOrder.browseSort)
+                    if (sortOrder == WorkshopSortOrder.TRENDING) {
+                        append("&days=").append(sortOrder.daysParam)
+                    }
+                    append("&p=").append(page)
+                    if (encodedQuery.isNotEmpty()) {
+                        append("&searchtext=").append(encodedQuery)
+                    }
+                }
+            }
+
+            return buildList {
+                // 1. Default browse without forced section works across standard, MTX, and curated workshops
+                add(makeUrl(section = null))
+                // 2. Standard mod/item section fallback
+                add(makeUrl(section = "readytouseitems"))
+                // 3. MTX/skins/curated items section fallback (e.g., CS2 / Dota 2 / TF2 / Rust)
+                add(makeUrl(section = "mtxitems"))
+                // 4. Game workshop hub fallback for page 1 without search query
+                if (page == 1 && encodedQuery.isEmpty()) {
+                    add("https://steamcommunity.com/app/$appId/workshop/")
+                }
+            }
+        }
 
         fun parseSteamSpyTop100(
             jsonString: String,
@@ -339,42 +421,78 @@ class SteamWorkshopRepository(
         fun parseWorkshopBrowseHtml(html: String, appId: Int): List<WorkshopModItem> {
             if (html.isBlank()) return emptyList()
             val chunks = WORKSHOP_ITEM_SPLIT_REGEX.split(html)
-            if (chunks.size <= 1) return emptyList()
+            val cardItems = if (chunks.size > 1) {
+                chunks.drop(1).mapNotNull { block ->
+                    val window = block.take(3500)
+                    val id = FILE_ID_REGEX.find(window)?.groupValues?.getOrNull(1)
+                        ?: LINK_ID_REGEX.find(window)?.groupValues?.getOrNull(1)
+                        ?: return@mapNotNull null
 
-            return chunks.drop(1).mapNotNull { block ->
-                // Limit scanning window to the card markup
-                val window = block.take(2500)
-                val id = FILE_ID_REGEX.find(window)?.groupValues?.getOrNull(1)
-                    ?: LINK_ID_REGEX.find(window)?.groupValues?.getOrNull(1)
-                    ?: return@mapNotNull null
+                    val rawTitle = TITLE_REGEX.find(window)?.groupValues?.getOrNull(1)
+                        ?: return@mapNotNull null
+                    val title = cleanHtmlText(rawTitle)
+                    if (title.isBlank()) return@mapNotNull null
 
-                val rawTitle = TITLE_REGEX.find(window)?.groupValues?.getOrNull(1) ?: return@mapNotNull null
-                val title = cleanHtmlText(rawTitle)
-                if (title.isBlank()) return@mapNotNull null
+                    val rawAuthorBlock = AUTHOR_REGEX.find(window)?.groupValues?.getOrNull(1).orEmpty()
+                    val authorInner = ANCHOR_TEXT_REGEX.find(rawAuthorBlock)?.groupValues?.getOrNull(1)
+                        ?: rawAuthorBlock.replace(Regex("""^\s*by\s+""", RegexOption.IGNORE_CASE), "")
+                    val author = cleanHtmlText(authorInner).ifBlank { "Steam-skapare" }
 
-                val author = AUTHOR_REGEX.find(window)?.groupValues?.getOrNull(1)
-                    ?.let { cleanHtmlText(it) }
-                    ?.ifBlank { "Steam-skapare" }
-                    ?: "Steam-skapare"
+                    val previewUrl = PREVIEW_IMG_TAG_REGEX.find(window)?.value
+                        ?.let { imgTag -> IMG_SRC_ATTR_REGEX.find(imgTag)?.groupValues?.getOrNull(1) }
+                        ?.replace("&amp;", "&")
+                        .orEmpty()
 
-                val previewUrl = PREVIEW_IMG_REGEX.find(window)?.groupValues?.getOrNull(1)
-                    ?.replace("&amp;", "&")
-                    .orEmpty()
+                    val ratingUrl = RATING_IMG_TAG_REGEX.find(window)?.value
+                        ?.let { imgTag -> IMG_SRC_ATTR_REGEX.find(imgTag)?.groupValues?.getOrNull(1) }
+                        ?.replace("&amp;", "&")
+                        .orEmpty()
 
-                val ratingUrl = RATING_IMG_REGEX.find(window)?.groupValues?.getOrNull(1)
-                    ?.replace("&amp;", "&")
-                    .orEmpty()
-
-                WorkshopModItem(
-                    publishedFileId = id,
-                    appId = appId,
-                    title = title,
-                    author = author,
-                    previewUrl = previewUrl,
-                    itemUrl = "https://steamcommunity.com/sharedfiles/filedetails/?id=$id",
-                    ratingStarsUrl = ratingUrl
-                )
+                    WorkshopModItem(
+                        publishedFileId = id,
+                        appId = appId,
+                        title = title,
+                        author = author,
+                        previewUrl = previewUrl,
+                        itemUrl = "https://steamcommunity.com/sharedfiles/filedetails/?id=$id",
+                        ratingStarsUrl = ratingUrl
+                    )
+                }.distinctBy { it.publishedFileId }
+            } else {
+                emptyList()
             }
+
+            if (cardItems.isNotEmpty()) return cardItems
+
+            // Fallback parser for hub showcase or alternate card layouts
+            val byId = linkedMapOf<String, WorkshopModItem>()
+            HUB_LINK_FALLBACK_REGEX.findAll(html).forEach { match ->
+                val id = match.groupValues[1]
+                val inner = match.groupValues[2]
+                val titleFromDiv = TITLE_REGEX.find(inner)?.groupValues?.getOrNull(1)
+                    ?.let { cleanHtmlText(it) }
+                    .orEmpty()
+                val textTitle = cleanHtmlText(inner)
+                val imgUrl = ANY_IMG_TAG_REGEX.find(inner)?.value
+                    ?.let { IMG_SRC_ATTR_REGEX.find(it)?.groupValues?.getOrNull(1) }
+                    ?.replace("&amp;", "&")
+                    .orEmpty()
+
+                val existing = byId[id]
+                val resolvedTitle = titleFromDiv.ifBlank { textTitle }.ifBlank { existing?.title.orEmpty() }
+                val resolvedImg = imgUrl.ifBlank { existing?.previewUrl.orEmpty() }
+                if (resolvedTitle.isNotBlank() || resolvedImg.isNotBlank()) {
+                    byId[id] = WorkshopModItem(
+                        publishedFileId = id,
+                        appId = appId,
+                        title = resolvedTitle.ifBlank { "Workshop Item #$id" },
+                        author = existing?.author ?: "Steam-skapare",
+                        previewUrl = resolvedImg,
+                        itemUrl = "https://steamcommunity.com/sharedfiles/filedetails/?id=$id"
+                    )
+                }
+            }
+            return byId.values.toList()
         }
 
         private fun cleanHtmlText(raw: String): String {
