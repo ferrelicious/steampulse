@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "116329660329",
+    "project_id": "steampulse-5487d",
+    "storage_bucket": "steampulse-5487d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:116329660329:android:6321124d33eb4f302dceb8",
+        "android_client_info": {
+          "package_name": "com.ferrelicious.steampulse"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "116329660329-4987mmv4f0rb6agl2vagmqdn2e53e4fv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ferrelicious.steampulse",
+            "certificate_hash": "51141e2e5601d08962fe750a1c32782693f1444c"
+          }
+        },
+        {
+          "client_id": "116329660329-3pk93eilel8km7r1sh0u2q6lu9risl2h.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC72mGEUGWay7DpqiVhWOaiNw8xO-Pe-Ow"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "116329660329-3pk93eilel8km7r1sh0u2q6lu9risl2h.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
