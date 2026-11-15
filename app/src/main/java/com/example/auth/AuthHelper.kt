@@ -19,7 +19,6 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -116,12 +115,25 @@ fun onGoogleSignInClicked(
             val activity = context.findActivity()
                 ?: throw IllegalStateException("Inloggning kräver en aktiv Activity-kontext.")
 
-            val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-            val request = GetCredentialRequest.Builder()
-                .addCredentialOption(signInOption)
-                .build()
+            val result = try {
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val primaryRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+                credentialManager.getCredential(activity, primaryRequest)
+            } catch (primaryEx: GetCredentialException) {
+                Log.w(TAG, "GetGoogleIdOption misslyckades (${primaryEx.type}): ${primaryEx.message}")
+                val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInOption)
+                    .build()
+                credentialManager.getCredential(activity, fallbackRequest)
+            }
 
-            val result = credentialManager.getCredential(activity, request)
             val credential = result.credential
             if (credential is CustomCredential &&
                 credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -133,31 +145,15 @@ fun onGoogleSignInClicked(
             } else {
                 onAuthError("Oväntad autentiseringstyp mottagen: ${credential.type}")
             }
+        } catch (e: GetCredentialCancellationException) {
+            Log.w(TAG, "Avbruten (${e.type}): ${e.message}", e)
+            onAuthCancelled()
+            if (!e.message.isNullOrBlank()) {
+                onAuthError("Avbruten (${e.type}): ${e.message}")
+            }
         } catch (e: GetCredentialException) {
-            val msg = e.message.orEmpty()
-            val isReauthOrConfigFailure = msg.contains("reauth", ignoreCase = true) ||
-                msg.contains("[16]") ||
-                msg.contains("Cannot find a matching credential", ignoreCase = true)
-
-            if (e is GetCredentialCancellationException && !isReauthOrConfigFailure) {
-                Log.w(TAG, "Användaren avbröt inloggningen.")
-                onAuthCancelled()
-                return@launch
-            }
-
-            Log.w(TAG, "CredentialManager misslyckades (${e.type}: $msg), byter till OAuthProvider fallback...")
-            try {
-                val activity = context.findActivity()
-                    ?: throw IllegalStateException("Inloggning kräver en aktiv Activity-kontext.")
-                val provider = OAuthProvider.newBuilder("google.com")
-                    .addCustomParameter("prompt", "select_account")
-                    .build()
-                Firebase.auth.startActivityForSignInWithProvider(activity, provider).await()
-                onAuthSuccess()
-            } catch (fallbackEx: Exception) {
-                Log.e(TAG, "OAuthProvider fallback misslyckades", fallbackEx)
-                onAuthError("Inloggningen misslyckades: ${fallbackEx.localizedMessage ?: msg}")
-            }
+            Log.e(TAG, "CredentialManager misslyckades (${e.type}): ${e.message}", e)
+            onAuthError("Google-inloggning (${e.type}): ${e.message ?: "Okänt fel"}")
         } catch (e: Exception) {
             Log.e(TAG, "Google Sign-In failed", e)
             onAuthError(e.localizedMessage ?: "Inloggningen misslyckades.")
