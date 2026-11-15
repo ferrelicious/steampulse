@@ -108,17 +108,37 @@ class SteamWorkshopRepositoryTest {
     }
 
     @Test
-    fun buildBrowseCandidateUrls_startsWithoutForcedSectionAndIncludesFallbacks() {
-        val urls = SteamWorkshopRepository.buildBrowseCandidateUrls(
+    fun buildBrowseCandidateUrls_usesAllTimeMostSubscribedSearchAndPaginationParams() {
+        val defaultUrls = SteamWorkshopRepository.buildBrowseCandidateUrls(
             appId = 730,
             sortOrder = com.example.model.WorkshopSortOrder.MOST_SUBSCRIBED,
             searchQuery = "",
             page = 1
         )
-        assertTrue(urls[0].contains("browsesort=totalsubscribers"))
-        assertTrue(!urls[0].contains("section="))
-        assertTrue(urls.any { it.contains("section=readytouseitems") })
-        assertTrue(urls.any { it.contains("section=mtxitems") })
-        assertTrue(urls.any { it.endsWith("/app/730/workshop/") })
+        assertTrue(defaultUrls[0].contains("browsesort=totaluniquesubscribers"))
+        assertTrue(defaultUrls[0].contains("actualsort=totaluniquesubscribers"))
+        assertTrue(defaultUrls[0].contains("days=-1"))
+        assertTrue(defaultUrls[0].contains("p=1"))
+        assertTrue(!defaultUrls[0].contains("section="))
+        assertTrue(defaultUrls.any { it.contains("section=readytouseitems") })
+        assertTrue(defaultUrls.any { it.contains("section=mtxitems") })
+        assertTrue(defaultUrls.any { it.endsWith("/app/730/workshop/") })
+
+        val pagedSearchUrls = SteamWorkshopRepository.buildBrowseCandidateUrls(
+            appId = 294100,
+            sortOrder = com.example.model.WorkshopSortOrder.TOP_RATED,
+            searchQuery = "combat extended",
+            page = 2
+        )
+        assertTrue(pagedSearchUrls[0].contains("browsesort=toprated"))
+        assertTrue(pagedSearchUrls[0].contains("actualsort=toprated"))
+        assertTrue(pagedSearchUrls[0].contains("days=-1"))
+        assertTrue(pagedSearchUrls[0].contains("p=2"))
+        assertTrue(pagedSearchUrls[0].contains("searchtext=combat+extended"))
+
+        assertEquals(
+            "birthtime=0; lastagecheckage=1-0-1990; wants_mature_content=1",
+            SteamWorkshopRepository.STEAM_AGE_BYPASS_COOKIE
+        )
     }
 }

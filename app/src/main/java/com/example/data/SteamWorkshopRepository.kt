@@ -83,6 +83,7 @@ class SteamWorkshopRepository(
         }
 
         val hasNextPage = lastHtml.contains("p=${page + 1}", ignoreCase = true) ||
+            lastHtml.contains("ShowPage( ${page + 1}", ignoreCase = true) ||
             rawItems.size >= 24
 
         if (rawItems.isEmpty()) {
@@ -155,7 +156,8 @@ class SteamWorkshopRepository(
             val req = Request.Builder()
                 .url(item.itemUrl)
                 .header("User-Agent", DESKTOP_USER_AGENT)
-                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8")
+                .header("Cookie", STEAM_AGE_BYPASS_COOKIE)
                 .get()
                 .build()
             val html = httpClient.newCall(req).execute().use { resp ->
@@ -246,8 +248,8 @@ class SteamWorkshopRepository(
     companion object {
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        private const val STEAM_AGE_BYPASS_COOKIE =
-            "wants_mature_content=1; birthtime=568022401; lastagecheckage=1-0-1988"
+        const val STEAM_AGE_BYPASS_COOKIE =
+            "birthtime=0; lastagecheckage=1-0-1990; wants_mature_content=1"
 
         val KNOWN_WORKSHOP_APP_IDS: Set<Int> = setOf(
             4000,    // Garry's Mod
@@ -349,9 +351,7 @@ class SteamWorkshopRepository(
                         append("&section=").append(section)
                     }
                     append("&actualsort=").append(sortOrder.browseSort)
-                    if (sortOrder == WorkshopSortOrder.TRENDING) {
-                        append("&days=").append(sortOrder.daysParam)
-                    }
+                    append("&days=").append(sortOrder.daysParam)
                     append("&p=").append(page)
                     if (encodedQuery.isNotEmpty()) {
                         append("&searchtext=").append(encodedQuery)

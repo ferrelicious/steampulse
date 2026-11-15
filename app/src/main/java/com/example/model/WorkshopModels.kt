@@ -14,7 +14,7 @@ enum class WorkshopSortOrder(
     val browseSort: String,
     val daysParam: Int
 ) {
-    MOST_SUBSCRIBED("Mest Subscribed", "totalsubscribers", -1),
+    MOST_SUBSCRIBED("Mest Subscribed", "totaluniquesubscribers", -1),
     MOST_RECENT("Nyaste moddar", "mostrecent", -1),
     TRENDING("Populära nu", "trend", 7),
     TOP_RATED("Högst betyg", "toprated", -1)
