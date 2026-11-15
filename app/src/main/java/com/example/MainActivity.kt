@@ -328,7 +328,7 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = if (releaseState.hasUpdateAvailable) "Uppdatera" else "v${releaseState.currentVersionName}",
+                                text = if (releaseState.hasUpdateAvailable) "Uppdatera" else "v${BuildConfig.VERSION_NAME}",
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,

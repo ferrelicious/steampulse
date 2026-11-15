@@ -17,8 +17,8 @@ android {
     applicationId = "com.ferrelicious.steampulse"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0.0"
+    versionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull() ?: 1
+    versionName = providers.gradleProperty("versionName").orNull?.takeIf { it.isNotBlank() } ?: "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

@@ -108,35 +108,45 @@ jobs:
           cp debug.keystore ~/.android/debug.keystore
           cp debug.keystore app/debug.keystore
 
-      - name: Build Debug APK
-        run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug
-          else
-            gradle assembleDebug
-          fi
-          echo "================ APK SIGNATURE ================"
-          APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
-          echo "Fil: $APK_FILE"
-          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -n 1)/apksigner verify --print-certs "$APK_FILE" | grep -E "SHA-1|SHA-256"
-          echo "==============================================="
-
-      - name: Resolve unique release tag
+      - name: Resolve version and release tag
         id: meta
         run: |
           INPUT_TAG="${{ github.event.inputs.tag_name }}"
+          RUN_NUM="${{ github.run_number }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$INPUT_TAG" ]; then
             TAG="$INPUT_TAG"
+            VERSION="${TAG#v}"
           else
-            BASE_TAG="v1.0.${{ github.run_number }}"
-            TAG="$BASE_TAG"
+            VERSION="1.0.${RUN_NUM}"
+            TAG="v1.0.${RUN_NUM}"
             if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-              TAG="${BASE_TAG}.$(date -u +%Y%m%d%H%M%S)"
+              SUFFIX=$(date -u +%Y%m%d%H%M%S)
+              VERSION="1.0.${RUN_NUM}.${SUFFIX}"
+              TAG="v${VERSION}"
             fi
           fi
-          echo "Resolved release tag: $TAG"
+          echo "Resolved VERSION=$VERSION, VERSION_CODE=$RUN_NUM, TAG=$TAG"
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "VERSION_CODE=$RUN_NUM" >> "$GITHUB_OUTPUT"
           echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build Debug APK
+        run: |
+          VERSION="${{ steps.meta.outputs.VERSION }}"
+          VERSION_CODE="${{ steps.meta.outputs.VERSION_CODE }}"
+          TAG="${{ steps.meta.outputs.TAG }}"
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug -PversionName="$VERSION" -PversionCode="$VERSION_CODE"
+          else
+            gradle assembleDebug -PversionName="$VERSION" -PversionCode="$VERSION_CODE"
+          fi
+          APK_OUT="app/build/outputs/apk/debug/SteamPulse-${TAG}.apk"
+          mv app/build/outputs/apk/debug/app-debug.apk "$APK_OUT"
+          echo "================ APK SIGNATURE ================"
+          echo "Fil: $APK_OUT (versionName=$VERSION, versionCode=$VERSION_CODE)"
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -n 1)/apksigner verify --print-certs "$APK_OUT" | grep -E "SHA-1|SHA-256"
+          echo "==============================================="
 
       - name: Publish GitHub Release Page
         uses: softprops/action-gh-release@v2
@@ -146,6 +156,6 @@ jobs:
           prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true' || contains(steps.meta.outputs.TAG, '-') }}
           generate_release_notes: true
           files: |
-            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/debug/SteamPulse-${{ steps.meta.outputs.TAG }}.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
