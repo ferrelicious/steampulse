@@ -199,4 +199,42 @@ class SteamWorkshopRepositoryTest {
         assertEquals("55667788", items[0].publishedFileId)
         assertEquals("AJAX Loaded Mod", items[0].title)
     }
+
+    @Test
+    fun parseSteamStoreSearchJson_extractsGamesOutsideTop100WithThumbnails() {
+        val url = SteamWorkshopRepository.buildStoreSearchUrl("S.T.A.L.K.E.R. 2")
+        assertEquals(
+            "https://store.steampowered.com/api/storesearch/?term=S.T.A.L.K.E.R.+2&l=english&cc=US",
+            url
+        )
+
+        val storeJson = """
+            {
+              "total": 1,
+              "items": [
+                {
+                  "type": "app",
+                  "name": "S.T.A.L.K.E.R. 2: Heart of Chornobyl",
+                  "id": 1643320,
+                  "tiny_image": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1643320/capsule_231x87.jpg",
+                  "price": {
+                    "currency": "USD",
+                    "initial": 5999,
+                    "final": 5999
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val games = SteamWorkshopRepository.parseSteamStoreSearchJson(storeJson)
+        assertEquals(1, games.size)
+        assertEquals(1643320, games[0].appId)
+        assertEquals("S.T.A.L.K.E.R. 2: Heart of Chornobyl", games[0].name)
+        assertEquals(
+            "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1643320/capsule_231x87.jpg",
+            games[0].customImageUrl
+        )
+        assertEquals(0, games[0].rank)
+    }
 }

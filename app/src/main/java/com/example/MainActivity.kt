@@ -496,6 +496,7 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                     uiState = workshopState,
                                     onSelectLeaderboardMode = workshopViewModel::selectLeaderboardMode,
                                     onGameSearchChange = workshopViewModel::updateGameSearchQuery,
+                                    onSubmitGameSearch = workshopViewModel::submitGameSearch,
                                     onToggleOnlyWorkshopPowerhouses = workshopViewModel::toggleOnlyWorkshopPowerhouses,
                                     onRefreshGames = workshopViewModel::refreshTop100Games,
                                     onOpenGameWorkshop = workshopViewModel::openGameWorkshop,

@@ -56,6 +56,32 @@ class SteamWorkshopRepository(
         parseSteamSpyTop100(bodyText, mode)
     }
 
+    suspend fun searchSteamStoreGames(query: String): List<WorkshopGameSummary> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) return@withContext emptyList()
+
+        val url = buildStoreSearchUrl(trimmed)
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", DESKTOP_USER_AGENT)
+            .header("Accept", "application/json")
+            .get()
+            .build()
+
+        val bodyText = try {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Steam Store svarade med HTTP ${response.code}")
+                }
+                response.body?.string().orEmpty()
+            }
+        } catch (e: IOException) {
+            throw IOException("Kunde inte söka i Steam Store: ${e.localizedMessage ?: "nätverksfel"}", e)
+        }
+
+        parseSteamStoreSearchJson(bodyText)
+    }
+
     suspend fun fetchWorkshopMods(
         appId: Int,
         sortOrder: WorkshopSortOrder,
@@ -528,6 +554,49 @@ class SteamWorkshopRepository(
             return ordered.take(100).mapIndexed { idx, item ->
                 item.copy(rank = idx + 1)
             }
+        }
+
+        fun buildStoreSearchUrl(query: String): String {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            return "https://store.steampowered.com/api/storesearch/?term=$encoded&l=english&cc=US"
+        }
+
+        fun parseSteamStoreSearchJson(jsonString: String): List<WorkshopGameSummary> {
+            if (jsonString.isBlank()) return emptyList()
+            val root = JSONObject(jsonString)
+            val items = root.optJSONArray("items") ?: return emptyList()
+            return buildList {
+                for (i in 0 until items.length()) {
+                    val obj = items.optJSONObject(i) ?: continue
+                    val appId = obj.optInt("id", 0)
+                    if (appId <= 0) continue
+                    val name = obj.optString("name", "").trim()
+                    if (name.isBlank()) continue
+                    val tinyImage = obj.optString("tiny_image", "").trim()
+                    val priceObj = obj.optJSONObject("price")
+                    val priceCents = priceObj?.optInt("final", 0) ?: 0
+                    val discountPercent = priceObj?.optInt("discount_percent", 0) ?: 0
+
+                    add(
+                        WorkshopGameSummary(
+                            rank = 0,
+                            appId = appId,
+                            name = name,
+                            developer = "Steam AppID $appId",
+                            publisher = "",
+                            ccu = 0,
+                            ownersRange = "—",
+                            positiveReviews = 0,
+                            negativeReviews = 0,
+                            averagePlaytimeMinutes = 0,
+                            priceCents = priceCents,
+                            discountPercent = discountPercent,
+                            isKnownWorkshopPowerhouse = KNOWN_WORKSHOP_APP_IDS.contains(appId),
+                            customImageUrl = tinyImage
+                        )
+                    )
+                }
+            }.distinctBy { it.appId }
         }
 
         fun parseWorkshopResponseBody(body: String, appId: Int): List<WorkshopModItem> {

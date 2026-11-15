@@ -12,6 +12,7 @@ import com.example.model.WorkshopModsUiState
 import com.example.model.WorkshopSortOrder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +24,9 @@ data class WorkshopScreenUiState(
     val gameSearchQuery: String = "",
     val onlyWorkshopPowerhouses: Boolean = false,
     val gamesState: WorkshopGamesUiState = WorkshopGamesUiState.Loading,
+    val isSearchingStore: Boolean = false,
+    val storeSearchResults: List<WorkshopGameSummary>? = null,
+    val storeSearchError: String? = null,
     val selectedGame: WorkshopGameSummary? = null,
     val sortOrder: WorkshopSortOrder = WorkshopSortOrder.MOST_SUBSCRIBED,
     val modSearchQuery: String = "",
@@ -31,8 +35,16 @@ data class WorkshopScreenUiState(
     val selectedModDetail: WorkshopModItem? = null,
     val isModDetailLoading: Boolean = false
 ) {
+    val isShowingStoreSearch: Boolean
+        get() = storeSearchResults != null
+
     val filteredGames: List<WorkshopGameSummary>
         get() {
+            val remoteResults = storeSearchResults
+            if (remoteResults != null) {
+                return remoteResults
+            }
+
             val all = (gamesState as? WorkshopGamesUiState.Success)?.games.orEmpty()
             val q = gameSearchQuery.trim()
             return all.filter { game ->
@@ -55,6 +67,7 @@ class WorkshopViewModel(
 
     private val cacheByMode = mutableMapOf<WorkshopLeaderboardMode, List<WorkshopGameSummary>>()
     private var loadGamesJob: Job? = null
+    private var searchStoreJob: Job? = null
     private var loadModsJob: Job? = null
     private var loadDetailJob: Job? = null
 
@@ -63,15 +76,101 @@ class WorkshopViewModel(
     }
 
     fun selectLeaderboardMode(mode: WorkshopLeaderboardMode) {
-        if (_uiState.value.leaderboardMode == mode && _uiState.value.gamesState is WorkshopGamesUiState.Success) {
+        if (_uiState.value.leaderboardMode == mode &&
+            _uiState.value.gamesState is WorkshopGamesUiState.Success &&
+            _uiState.value.storeSearchResults == null
+        ) {
             return
         }
-        _uiState.update { it.copy(leaderboardMode = mode) }
+        searchStoreJob?.cancel()
+        _uiState.update {
+            it.copy(
+                leaderboardMode = mode,
+                gameSearchQuery = "",
+                isSearchingStore = false,
+                storeSearchResults = null,
+                storeSearchError = null
+            )
+        }
         loadTop100Games(mode)
     }
 
     fun updateGameSearchQuery(query: String) {
         _uiState.update { it.copy(gameSearchQuery = query) }
+        val trimmed = query.trim()
+
+        searchStoreJob?.cancel()
+        if (trimmed.isEmpty() || trimmed.length < 2 || trimmed.all { it.isDigit() }) {
+            _uiState.update {
+                it.copy(
+                    isSearchingStore = false,
+                    storeSearchResults = null,
+                    storeSearchError = null
+                )
+            }
+            return
+        }
+
+        searchStoreJob = viewModelScope.launch {
+            delay(400L)
+            executeStoreSearch(trimmed)
+        }
+    }
+
+    fun submitGameSearch() {
+        val trimmed = _uiState.value.gameSearchQuery.trim()
+        val numericId = trimmed.toIntOrNull()
+        if (numericId != null && numericId > 0) {
+            openCustomAppWorkshop(numericId)
+            return
+        }
+        if (trimmed.length < 2) return
+        searchStoreJob?.cancel()
+        searchStoreJob = viewModelScope.launch {
+            executeStoreSearch(trimmed)
+        }
+    }
+
+    private suspend fun executeStoreSearch(trimmedQuery: String) {
+        _uiState.update { it.copy(isSearchingStore = true, storeSearchError = null) }
+        try {
+            val rawResults = repository.searchSteamStoreGames(trimmedQuery)
+            val cachedById = ((_uiState.value.gamesState as? WorkshopGamesUiState.Success)?.games)
+                .orEmpty()
+                .associateBy { it.appId }
+            val mergedResults = rawResults.map { storeGame ->
+                cachedById[storeGame.appId]?.let { cached ->
+                    cached.copy(
+                        customImageUrl = storeGame.customImageUrl.ifBlank { cached.customImageUrl }
+                    )
+                } ?: storeGame
+            }
+            _uiState.update { current ->
+                if (current.gameSearchQuery.trim() == trimmedQuery) {
+                    current.copy(
+                        isSearchingStore = false,
+                        storeSearchResults = mergedResults,
+                        storeSearchError = null
+                    )
+                } else {
+                    current
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed Steam Store search for '$trimmedQuery'", e)
+            _uiState.update { current ->
+                if (current.gameSearchQuery.trim() == trimmedQuery) {
+                    current.copy(
+                        isSearchingStore = false,
+                        storeSearchError = e.localizedMessage ?: "Kunde inte söka i Steam Store."
+                    )
+                } else {
+                    current
+                }
+            }
+        }
     }
 
     fun toggleOnlyWorkshopPowerhouses() {

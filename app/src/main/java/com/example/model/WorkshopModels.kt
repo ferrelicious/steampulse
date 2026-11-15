@@ -33,7 +33,8 @@ data class WorkshopGameSummary(
     val averagePlaytimeMinutes: Int,
     val priceCents: Int,
     val discountPercent: Int,
-    val isKnownWorkshopPowerhouse: Boolean
+    val isKnownWorkshopPowerhouse: Boolean,
+    val customImageUrl: String = ""
 ) {
     val headerImageUrl: String
         get() = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/header.jpg"

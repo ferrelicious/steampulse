@@ -111,6 +111,7 @@ fun WorkshopScreen(
     uiState: WorkshopScreenUiState,
     onSelectLeaderboardMode: (WorkshopLeaderboardMode) -> Unit,
     onGameSearchChange: (String) -> Unit,
+    onSubmitGameSearch: () -> Unit = {},
     onToggleOnlyWorkshopPowerhouses: () -> Unit,
     onRefreshGames: () -> Unit,
     onOpenGameWorkshop: (WorkshopGameSummary) -> Unit,
@@ -130,6 +131,7 @@ fun WorkshopScreen(
             uiState = uiState,
             onSelectLeaderboardMode = onSelectLeaderboardMode,
             onGameSearchChange = onGameSearchChange,
+            onSubmitGameSearch = onSubmitGameSearch,
             onToggleOnlyWorkshopPowerhouses = onToggleOnlyWorkshopPowerhouses,
             onRefreshGames = onRefreshGames,
             onOpenGameWorkshop = onOpenGameWorkshop,
@@ -156,6 +158,7 @@ private fun Top100GamesDirectory(
     uiState: WorkshopScreenUiState,
     onSelectLeaderboardMode: (WorkshopLeaderboardMode) -> Unit,
     onGameSearchChange: (String) -> Unit,
+    onSubmitGameSearch: () -> Unit,
     onToggleOnlyWorkshopPowerhouses: () -> Unit,
     onRefreshGames: () -> Unit,
     onOpenGameWorkshop: (WorkshopGameSummary) -> Unit,
@@ -320,9 +323,11 @@ private fun Top100GamesDirectory(
                     onValueChange = onGameSearchChange,
                     placeholder = {
                         Text(
-                            text = "Sök i Topp 100 eller ange Steam AppID (t.ex. 294100)...",
+                            text = "Sök alla Steam-spel eller ange AppID (t.ex. 1643320)...",
                             color = SteamTextMuted,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
                     leadingIcon = {
@@ -352,6 +357,8 @@ private fun Top100GamesDirectory(
                         onSearch = {
                             if (customAppIdInput != null && customAppIdInput > 0) {
                                 onOpenCustomAppId(customAppIdInput)
+                            } else {
+                                onSubmitGameSearch()
                             }
                         }
                     ),
@@ -395,99 +402,192 @@ private fun Top100GamesDirectory(
             }
         }
 
-        when (val state = uiState.gamesState) {
-            WorkshopGamesUiState.Loading -> {
-                item(key = "games_loading") {
+        if (uiState.isSearchingStore) {
+            item(key = "store_search_loading") {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SteamSurface),
+                    border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("workshop_store_search_loading")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = SteamAccent,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Söker i hela Steam Store efter \"${uiState.gameSearchQuery.trim()}\"...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SteamTextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+
+        if (uiState.storeSearchError != null) {
+            item(key = "store_search_error") {
+                WorkshopErrorCard(
+                    message = uiState.storeSearchError,
+                    onRetry = onSubmitGameSearch
+                )
+            }
+        }
+
+        if (uiState.isShowingStoreSearch) {
+            item(key = "store_search_count") {
+                Text(
+                    text = "STEAM STORE-SÖKNING • ${filteredGames.size} TRÄFFAR",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SteamAccent
+                )
+            }
+
+            if (filteredGames.isEmpty() && !uiState.isSearchingStore) {
+                item(key = "store_search_empty") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = SteamSurface),
                         border = BorderStroke(1.dp, SteamBorder),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(20.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            CircularProgressIndicator(
-                                color = SteamAccent,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(26.dp)
+                            Text(
+                                text = "Inga spel hittades i Steam Store",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = SteamTextPrimary
                             )
-                            Column {
-                                Text(
-                                    text = "Hämtar Topp 100 Steam-spel...",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = SteamTextPrimary
-                                )
-                                Text(
-                                    text = "Synkar spelarantal och metadata live från SteamSpy",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = SteamTextSecondary
-                                )
-                            }
+                            Text(
+                                text = "Prova ett annat sökord eller ange ett numeriskt Steam AppID (t.ex. 1643320).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SteamTextSecondary
+                            )
                         }
                     }
                 }
-            }
-
-            is WorkshopGamesUiState.Error -> {
-                item(key = "games_error") {
-                    WorkshopErrorCard(
-                        message = state.message,
-                        onRetry = onRefreshGames
+            } else {
+                items(
+                    items = filteredGames,
+                    key = { "store_${it.appId}" }
+                ) { game ->
+                    WorkshopGameCard(
+                        game = game,
+                        onClick = { onOpenGameWorkshop(game) }
                     )
                 }
             }
-
-            is WorkshopGamesUiState.Success -> {
-                item(key = "games_count") {
-                    Text(
-                        text = "VISAR ${filteredGames.size} AV ${state.games.size} SPEL",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SteamTextSecondary
-                    )
-                }
-
-                if (filteredGames.isEmpty()) {
-                    item(key = "games_empty") {
+        } else {
+            when (val state = uiState.gamesState) {
+                WorkshopGamesUiState.Loading -> {
+                    item(key = "games_loading") {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = SteamSurface),
                             border = BorderStroke(1.dp, SteamBorder),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                Text(
-                                    text = "Inga matchande spel i Topp 100",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = SteamTextPrimary
+                                CircularProgressIndicator(
+                                    color = SteamAccent,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(26.dp)
                                 )
-                                Text(
-                                    text = "Prova att rensa filtret eller sök efter ett Steam AppID.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = SteamTextSecondary
-                                )
+                                Column {
+                                    Text(
+                                        text = "Hämtar Topp 100 Steam-spel...",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = SteamTextPrimary
+                                    )
+                                    Text(
+                                        text = "Synkar spelarantal och metadata live från SteamSpy",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SteamTextSecondary
+                                    )
+                                }
                             }
                         }
                     }
-                } else {
-                    items(
-                        items = filteredGames,
-                        key = { it.appId }
-                    ) { game ->
-                        WorkshopGameCard(
-                            game = game,
-                            onClick = { onOpenGameWorkshop(game) }
+                }
+
+                is WorkshopGamesUiState.Error -> {
+                    item(key = "games_error") {
+                        WorkshopErrorCard(
+                            message = state.message,
+                            onRetry = onRefreshGames
                         )
+                    }
+                }
+
+                is WorkshopGamesUiState.Success -> {
+                    item(key = "games_count") {
+                        Text(
+                            text = "VISAR ${filteredGames.size} AV ${state.games.size} SPEL",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SteamTextSecondary
+                        )
+                    }
+
+                    if (filteredGames.isEmpty()) {
+                        item(key = "games_empty") {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = SteamSurface),
+                                border = BorderStroke(1.dp, SteamBorder),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(20.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Inga matchande spel i Topp 100",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = SteamTextPrimary
+                                    )
+                                    Text(
+                                        text = "Skriv minst 2 tecken för att söka i hela Steam Store eller ange ett Steam AppID.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SteamTextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(
+                            items = filteredGames,
+                            key = { it.appId }
+                        ) { game ->
+                            WorkshopGameCard(
+                                game = game,
+                                onClick = { onOpenGameWorkshop(game) }
+                            )
+                        }
                     }
                 }
             }
@@ -501,13 +601,16 @@ private fun WorkshopGameCard(
     game: WorkshopGameSummary,
     onClick: () -> Unit
 ) {
-    var imageAttempt by remember(game.appId) { mutableIntStateOf(0) }
-    val imageUrl = when (imageAttempt) {
-        0 -> game.headerImageUrl
-        1 -> game.fallbackHeaderImageUrl
-        2 -> game.capsuleImageUrl
-        else -> null
+    var imageAttempt by remember(game.appId, game.customImageUrl) { mutableIntStateOf(0) }
+    val imageUrls = remember(game.appId, game.customImageUrl) {
+        listOf(
+            game.customImageUrl,
+            game.headerImageUrl,
+            game.fallbackHeaderImageUrl,
+            game.capsuleImageUrl
+        ).filter { it.isNotBlank() }.distinct()
     }
+    val imageUrl = imageUrls.getOrNull(imageAttempt)
 
     Card(
         onClick = onClick,
@@ -562,20 +665,22 @@ private fun WorkshopGameCard(
                         )
                     }
                 }
-                Surface(
-                    color = Color(0xCC020617),
-                    shape = RoundedCornerShape(bottomEnd = 8.dp)
-                ) {
-                    Text(
-                        text = "#${game.rank}",
-                        fontFamily = JetBrainsMonoFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                        color = SteamAccent,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                if (game.rank > 0) {
+                    Surface(
+                        color = Color(0xCC020617),
+                        shape = RoundedCornerShape(bottomEnd = 8.dp)
+                    ) {
+                        Text(
+                            text = "#${game.rank}",
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            color = SteamAccent,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
 
@@ -757,13 +862,16 @@ private fun GameWorkshopDetailPage(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column {
-                            var heroAttempt by remember(game.appId) { mutableIntStateOf(0) }
-                            val heroUrl = when (heroAttempt) {
-                                0 -> game.headerImageUrl
-                                1 -> game.fallbackHeaderImageUrl
-                                2 -> game.capsuleImageUrl
-                                else -> null
+                            var heroAttempt by remember(game.appId, game.customImageUrl) { mutableIntStateOf(0) }
+                            val heroUrls = remember(game.appId, game.customImageUrl) {
+                                listOf(
+                                    game.headerImageUrl,
+                                    game.fallbackHeaderImageUrl,
+                                    game.capsuleImageUrl,
+                                    game.customImageUrl
+                                ).filter { it.isNotBlank() }.distinct()
                             }
+                            val heroUrl = heroUrls.getOrNull(heroAttempt)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
