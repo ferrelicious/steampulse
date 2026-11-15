@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.content.Context
+import android.util.Log
 import com.example.R
 import com.example.firebase.OperationType
 import com.example.firebase.handleFirestoreError
@@ -13,10 +14,14 @@ import com.example.model.WorkshopModItem
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
+import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.QuerySnapshot
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +30,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 
 class WorkshopFollowRepository(
     private val db: FirebaseFirestore,
@@ -122,6 +128,71 @@ class WorkshopFollowRepository(
         throw error
     }
 
+    private suspend fun safeGetDocument(docRef: DocumentReference): DocumentSnapshot? {
+        val defaultSnap = try {
+            withTimeoutOrNull(FIRESTORE_READ_TIMEOUT_MS) {
+                docRef.get(Source.DEFAULT).await()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (isPermissionDenied(e)) throw e
+            Log.w(TAG, "Firestore DEFAULT get failed for ${docRef.path}, falling back to CACHE", e)
+            null
+        }
+        if (defaultSnap != null) return defaultSnap
+
+        return try {
+            docRef.get(Source.CACHE).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore CACHE get missed for ${docRef.path}", e)
+            null
+        }
+    }
+
+    private suspend fun safeGetCollection(colRef: CollectionReference): QuerySnapshot? {
+        val defaultSnap = try {
+            withTimeoutOrNull(FIRESTORE_READ_TIMEOUT_MS) {
+                colRef.get(Source.DEFAULT).await()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (isPermissionDenied(e)) throw e
+            Log.w(TAG, "Firestore DEFAULT collection get failed for ${colRef.path}, falling back to CACHE", e)
+            null
+        }
+        if (defaultSnap != null) return defaultSnap
+
+        return try {
+            colRef.get(Source.CACHE).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore CACHE collection get missed for ${colRef.path}", e)
+            null
+        }
+    }
+
+    private fun isPermissionDenied(error: Throwable): Boolean {
+        return generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .any { it.code == FirebaseFirestoreException.Code.PERMISSION_DENIED }
+    }
+
+    private fun isOfflineOrUnavailable(error: Throwable): Boolean {
+        val fsEx = generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .firstOrNull()
+        if (fsEx != null) {
+            return fsEx.code == FirebaseFirestoreException.Code.UNAVAILABLE ||
+                fsEx.message?.contains("offline", ignoreCase = true) == true
+        }
+        return error.message?.contains("offline", ignoreCase = true) == true
+    }
+
     suspend fun followGame(game: WorkshopGameSummary): Result<Unit> {
         val uid = requireUserId()
         val safeAppId = game.appId.coerceIn(1, 100_000_000)
@@ -135,8 +206,8 @@ class WorkshopFollowRepository(
         val safeHeader = game.customImageUrl.ifBlank { game.headerImageUrl }.trim().take(500)
 
         return try {
-            val existing = docRef.get().await()
-            if (existing.exists()) {
+            val existing = safeGetDocument(docRef)
+            val task = if (existing?.exists() == true) {
                 docRef.update(
                     mapOf(
                         "gameName" to safeName,
@@ -144,7 +215,7 @@ class WorkshopFollowRepository(
                         "headerImageUrl" to safeHeader,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
-                ).await()
+                )
             } else {
                 docRef.set(
                     mapOf(
@@ -156,14 +227,22 @@ class WorkshopFollowRepository(
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
-                ).await()
+                )
+            }
+            withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                task.await()
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docRef.path)
-            Result.failure(e)
+            if (isOfflineOrUnavailable(e)) {
+                Log.w(TAG, "followGame queued/deferred while offline for ${docRef.path}", e)
+                Result.success(Unit)
+            } else {
+                handleFirestoreError(e, OperationType.WRITE, docRef.path)
+                Result.failure(e)
+            }
         }
     }
 
@@ -175,13 +254,20 @@ class WorkshopFollowRepository(
             .document(appId.toString())
 
         return try {
-            docRef.delete().await()
+            withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                docRef.delete().await()
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, docRef.path)
-            Result.failure(e)
+            if (isOfflineOrUnavailable(e)) {
+                Log.w(TAG, "unfollowGame queued/deferred while offline for ${docRef.path}", e)
+                Result.success(Unit)
+            } else {
+                handleFirestoreError(e, OperationType.DELETE, docRef.path)
+                Result.failure(e)
+            }
         }
     }
 
@@ -193,7 +279,11 @@ class WorkshopFollowRepository(
      * - If BOOKMARK -> deletes document.
      * Returns true if the mod is now bookmarked, false if unbookmarked.
      */
-    suspend fun toggleBookmarkMod(mod: WorkshopModItem, gameName: String): Result<Boolean> {
+    suspend fun toggleBookmarkMod(
+        mod: WorkshopModItem,
+        gameName: String,
+        fallbackExistingSource: String? = null
+    ): Result<Boolean> {
         val uid = requireUserId()
         val safeId = sanitizeDocId(mod.publishedFileId)
         val docRef = db.collection("users")
@@ -212,69 +302,128 @@ class WorkshopFollowRepository(
         val safeUpdatedEpoch = (mod.updatedEpochSec ?: 0L).coerceAtLeast(0L)
         val safeSubs = (mod.subscriptions ?: 0L).coerceAtLeast(0L)
 
+        var targetBookmarkedState = true
         return try {
-            val existingSnap = docRef.get().await()
-            if (!existingSnap.exists()) {
-                docRef.set(
-                    mapOf(
-                        "userId" to uid,
-                        "publishedFileId" to safeId,
-                        "appId" to safeAppId,
-                        "gameName" to safeGameName,
-                        "title" to safeTitle,
-                        "author" to safeAuthor,
-                        "previewUrl" to safePreview,
-                        "itemUrl" to safeItemUrl,
-                        "source" to WorkshopFollowSource.BOOKMARK,
-                        "updatedEpochSec" to safeUpdatedEpoch,
-                        "subscriptions" to safeSubs,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-                Result.success(true)
-            } else {
+            val existingSnap = safeGetDocument(docRef)
+            if (existingSnap != null && existingSnap.exists()) {
                 val existingSource = existingSnap.getString("source") ?: WorkshopFollowSource.BOOKMARK
                 when (existingSource) {
                     WorkshopFollowSource.STEAM_SYNC -> {
-                        docRef.update(
-                            mapOf(
-                                "appId" to safeAppId,
-                                "gameName" to safeGameName.ifBlank { existingSnap.getString("gameName").orEmpty() },
-                                "title" to safeTitle,
-                                "author" to safeAuthor.ifBlank { existingSnap.getString("author").orEmpty() },
-                                "previewUrl" to safePreview.ifBlank { existingSnap.getString("previewUrl").orEmpty() },
-                                "itemUrl" to safeItemUrl,
-                                "source" to WorkshopFollowSource.BOTH,
-                                "updatedEpochSec" to safeUpdatedEpoch,
-                                "subscriptions" to safeSubs,
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        ).await()
+                        targetBookmarkedState = true
+                        withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                            docRef.update(
+                                mapOf(
+                                    "appId" to safeAppId,
+                                    "gameName" to safeGameName.ifBlank { existingSnap.getString("gameName").orEmpty() },
+                                    "title" to safeTitle,
+                                    "author" to safeAuthor.ifBlank { existingSnap.getString("author").orEmpty() },
+                                    "previewUrl" to safePreview.ifBlank { existingSnap.getString("previewUrl").orEmpty() },
+                                    "itemUrl" to safeItemUrl,
+                                    "source" to WorkshopFollowSource.BOTH,
+                                    "updatedEpochSec" to safeUpdatedEpoch,
+                                    "subscriptions" to safeSubs,
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                        }
                         Result.success(true)
                     }
 
                     WorkshopFollowSource.BOTH -> {
-                        docRef.update(
-                            mapOf(
-                                "source" to WorkshopFollowSource.STEAM_SYNC,
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        ).await()
+                        targetBookmarkedState = false
+                        withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                            docRef.update(
+                                mapOf(
+                                    "source" to WorkshopFollowSource.STEAM_SYNC,
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                        }
                         Result.success(false)
                     }
 
                     else -> {
-                        docRef.delete().await()
+                        targetBookmarkedState = false
+                        withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                            docRef.delete().await()
+                        }
                         Result.success(false)
+                    }
+                }
+            } else {
+                when (fallbackExistingSource) {
+                    WorkshopFollowSource.BOOKMARK -> {
+                        targetBookmarkedState = false
+                        withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                            docRef.delete().await()
+                        }
+                        Result.success(false)
+                    }
+
+                    WorkshopFollowSource.BOTH -> {
+                        targetBookmarkedState = false
+                        withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                            docRef.set(
+                                mapOf(
+                                    "userId" to uid,
+                                    "publishedFileId" to safeId,
+                                    "appId" to safeAppId,
+                                    "gameName" to safeGameName,
+                                    "title" to safeTitle,
+                                    "author" to safeAuthor,
+                                    "previewUrl" to safePreview,
+                                    "itemUrl" to safeItemUrl,
+                                    "source" to WorkshopFollowSource.STEAM_SYNC,
+                                    "updatedEpochSec" to safeUpdatedEpoch,
+                                    "subscriptions" to safeSubs,
+                                    "createdAt" to FieldValue.serverTimestamp(),
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                        }
+                        Result.success(false)
+                    }
+
+                    else -> {
+                        targetBookmarkedState = true
+                        val targetSource = if (fallbackExistingSource == WorkshopFollowSource.STEAM_SYNC) {
+                            WorkshopFollowSource.BOTH
+                        } else {
+                            WorkshopFollowSource.BOOKMARK
+                        }
+                        withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                            docRef.set(
+                                mapOf(
+                                    "userId" to uid,
+                                    "publishedFileId" to safeId,
+                                    "appId" to safeAppId,
+                                    "gameName" to safeGameName,
+                                    "title" to safeTitle,
+                                    "author" to safeAuthor,
+                                    "previewUrl" to safePreview,
+                                    "itemUrl" to safeItemUrl,
+                                    "source" to targetSource,
+                                    "updatedEpochSec" to safeUpdatedEpoch,
+                                    "subscriptions" to safeSubs,
+                                    "createdAt" to FieldValue.serverTimestamp(),
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                        }
+                        Result.success(true)
                     }
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docRef.path)
-            Result.failure(e)
+            if (isOfflineOrUnavailable(e)) {
+                Log.w(TAG, "toggleBookmarkMod queued/deferred while offline for ${docRef.path}", e)
+                Result.success(targetBookmarkedState)
+            } else {
+                handleFirestoreError(e, OperationType.WRITE, docRef.path)
+                Result.failure(e)
+            }
         }
     }
 
@@ -287,13 +436,20 @@ class WorkshopFollowRepository(
             .document(safeId)
 
         return try {
-            docRef.delete().await()
+            withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                docRef.delete().await()
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, docRef.path)
-            Result.failure(e)
+            if (isOfflineOrUnavailable(e)) {
+                Log.w(TAG, "removeFollowedMod queued/deferred while offline for ${docRef.path}", e)
+                Result.success(Unit)
+            } else {
+                handleFirestoreError(e, OperationType.DELETE, docRef.path)
+                Result.failure(e)
+            }
         }
     }
 
@@ -309,17 +465,18 @@ class WorkshopFollowRepository(
         val safeSteamId = steamId64.trim().take(32)
         val safeProfileInput = profileInput.trim().ifBlank { safeSteamId }.take(240)
 
-        return try {
-            val existingDocs = modsCollection.get().await()
-                .documents
-                .associate { it.id to (it.getString("source") ?: WorkshopFollowSource.BOOKMARK) }
+        val deduplicated = syncedMods
+            .mapNotNull { mod ->
+                val safeId = sanitizeDocIdOrNull(mod.publishedFileId) ?: return@mapNotNull null
+                mod.copy(publishedFileId = safeId)
+            }
+            .distinctBy { it.publishedFileId }
 
-            val deduplicated = syncedMods
-                .mapNotNull { mod ->
-                    val safeId = sanitizeDocIdOrNull(mod.publishedFileId) ?: return@mapNotNull null
-                    mod.copy(publishedFileId = safeId)
-                }
-                .distinctBy { it.publishedFileId }
+        return try {
+            val existingDocs = safeGetCollection(modsCollection)
+                ?.documents
+                ?.associate { it.id to (it.getString("source") ?: WorkshopFollowSource.BOOKMARK) }
+                .orEmpty()
 
             deduplicated.chunked(400).forEach { chunk ->
                 val batch = db.batch()
@@ -380,11 +537,13 @@ class WorkshopFollowRepository(
                         )
                     }
                 }
-                batch.commit().await()
+                withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    batch.commit().await()
+                }
             }
 
-            val existingSync = syncDocRef.get().await()
-            if (existingSync.exists()) {
+            val existingSync = safeGetDocument(syncDocRef)
+            val syncTask = if (existingSync?.exists() == true) {
                 syncDocRef.update(
                     mapOf(
                         "steamId64" to safeSteamId,
@@ -392,7 +551,7 @@ class WorkshopFollowRepository(
                         "syncedCount" to deduplicated.size,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
-                ).await()
+                )
             } else {
                 syncDocRef.set(
                     mapOf(
@@ -403,15 +562,23 @@ class WorkshopFollowRepository(
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
-                ).await()
+                )
+            }
+            withTimeoutOrNull(FIRESTORE_WRITE_TIMEOUT_MS) {
+                syncTask.await()
             }
 
             Result.success(deduplicated.size)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, modsCollection.path)
-            Result.failure(e)
+            if (isOfflineOrUnavailable(e)) {
+                Log.w(TAG, "syncSubscribedMods queued/deferred while offline for ${modsCollection.path}", e)
+                Result.success(deduplicated.size)
+            } else {
+                handleFirestoreError(e, OperationType.WRITE, modsCollection.path)
+                Result.failure(e)
+            }
         }
     }
 
@@ -426,6 +593,9 @@ class WorkshopFollowRepository(
     }
 
     companion object {
+        private const val TAG = "WorkshopFollowRepo"
+        private const val FIRESTORE_READ_TIMEOUT_MS = 3_500L
+        private const val FIRESTORE_WRITE_TIMEOUT_MS = 3_500L
         const val SYNC_DOC_ID = "steam"
     }
 }

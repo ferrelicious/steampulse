@@ -90,6 +90,7 @@ import com.example.data.SteamGamesCatalog
 import com.example.data.SteamWorkshopRepository
 import com.example.data.WatchlistRepository
 import com.example.data.WorkshopFollowRepository
+import com.example.data.WorkshopLocalStore
 import com.example.firebase.configureAppCheck
 import com.example.model.CurrencyMode
 import com.example.ui.screens.AiChatScreen
@@ -205,7 +206,8 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                 WorkshopViewModel(
                     repository = SteamWorkshopRepository(),
                     followRepository = WorkshopFollowRepository(db),
-                    userId = currentUserId
+                    userId = currentUserId,
+                    localStore = WorkshopLocalStore(app)
                 )
             }
         }

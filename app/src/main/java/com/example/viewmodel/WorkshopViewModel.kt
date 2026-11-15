@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.SteamProfilePrivateException
 import com.example.data.SteamWorkshopRepository
 import com.example.data.WorkshopFollowRepository
+import com.example.data.WorkshopLocalStore
 import com.example.model.FollowedWorkshopGame
 import com.example.model.FollowedWorkshopMod
 import com.example.model.SteamSyncUiState
@@ -19,6 +20,7 @@ import com.example.model.WorkshopModItem
 import com.example.model.WorkshopModsUiState
 import com.example.model.WorkshopSectionTab
 import com.example.model.WorkshopSortOrder
+import com.google.firebase.Timestamp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -90,7 +92,8 @@ data class WorkshopScreenUiState(
 class WorkshopViewModel(
     private val repository: SteamWorkshopRepository = SteamWorkshopRepository(),
     private val followRepository: WorkshopFollowRepository? = null,
-    private val userId: String? = null
+    private val userId: String? = null,
+    private val localStore: WorkshopLocalStore? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WorkshopScreenUiState())
@@ -100,6 +103,12 @@ class WorkshopViewModel(
     val toastEvents: SharedFlow<String> = _toastEvents.asSharedFlow()
 
     private val cacheByMode = mutableMapOf<WorkshopLeaderboardMode, List<WorkshopGameSummary>>()
+    private val pendingLocalGameIds = mutableSetOf<Int>()
+    private val removedGameIds = mutableSetOf<Int>()
+    private val pendingLocalModIds = mutableSetOf<String>()
+    private val removedModIds = mutableSetOf<String>()
+    private var hasPendingLocalSyncProfile = false
+
     private var loadGamesJob: Job? = null
     private var searchStoreJob: Job? = null
     private var loadModsJob: Job? = null
@@ -109,24 +118,67 @@ class WorkshopViewModel(
     private var lastFeedGameIds: Set<Int> = emptySet()
 
     init {
+        hydrateFromLocalStore()
         loadTop100Games(WorkshopLeaderboardMode.TWO_WEEKS)
         startObservingFollowedState()
+    }
+
+    private fun storeUserKey(): String = userId?.takeIf { it.isNotBlank() } ?: "default"
+
+    private fun hydrateFromLocalStore() {
+        val store = localStore ?: return
+        val snapshot = store.loadSnapshot(storeUserKey())
+        if (snapshot.followedGames.isEmpty() && snapshot.followedMods.isEmpty() && snapshot.syncProfile == null) {
+            return
+        }
+        _uiState.update { current ->
+            val prefill = current.steamProfileInput.ifBlank {
+                snapshot.syncProfile?.profileInput.orEmpty()
+                    .ifBlank { snapshot.syncProfile?.steamId64.orEmpty() }
+            }
+            current.copy(
+                followedGames = snapshot.followedGames,
+                followedMods = snapshot.followedMods,
+                syncProfile = snapshot.syncProfile,
+                steamProfileInput = prefill
+            )
+        }
+        lastFeedGameIds = snapshot.followedGames.map { it.appId }.toSet()
     }
 
     private fun startObservingFollowedState() {
         val repo = followRepository ?: return
         val uid = userId?.takeIf { it.isNotBlank() } ?: return
+        val storeKey = storeUserKey()
 
         viewModelScope.launch {
             repo.observeFollowedGames(uid)
-                .catch { e -> Log.e(TAG, "Failed observing followed games", e) }
-                .collect { games ->
-                    _uiState.update { it.copy(followedGames = games) }
-                    val newIds = games.map { it.appId }.toSet()
+                .catch { e -> Log.w(TAG, "Failed observing followed games (using local cache)", e) }
+                .collect { remoteGames ->
+                    val remoteIds = remoteGames.map { it.appId }.toSet()
+                    pendingLocalGameIds.removeAll(remoteIds)
+                    removedGameIds.retainAll(remoteIds)
+
+                    val currentGames = _uiState.value.followedGames
+                    val mergedGames = if (remoteGames.isEmpty() && currentGames.isNotEmpty() && removedGameIds.isEmpty()) {
+                        // Do not let an empty offline Firestore cache wipe locally persisted games.
+                        currentGames
+                    } else {
+                        val filteredRemote = remoteGames.filterNot { it.appId in removedGameIds }
+                        val keptPending = currentGames.filter { it.appId in pendingLocalGameIds }
+                        (keptPending + filteredRemote)
+                            .distinctBy { it.appId }
+                            .sortedByDescending { it.updatedAt?.seconds ?: 0L }
+                    }
+
+                    _uiState.update { it.copy(followedGames = mergedGames) }
+                    localStore?.saveFollowedGames(storeKey, mergedGames)
+
+                    val newIds = mergedGames.map { it.appId }.toSet()
                     if (newIds != lastFeedGameIds) {
                         lastFeedGameIds = newIds
-                        if (_uiState.value.activeSectionTab == WorkshopSectionTab.FOLLOWED || games.isEmpty()) {
-                            refreshFollowedGamesFeed(games)
+                        if (_uiState.value.activeSectionTab == WorkshopSectionTab.FOLLOWED || mergedGames.isEmpty()) {
+                            refreshFollowedGamesFeed(mergedGames)
                         }
                     }
                 }
@@ -134,24 +186,55 @@ class WorkshopViewModel(
 
         viewModelScope.launch {
             repo.observeFollowedMods(uid)
-                .catch { e -> Log.e(TAG, "Failed observing followed mods", e) }
-                .collect { mods ->
-                    _uiState.update { it.copy(followedMods = mods) }
+                .catch { e -> Log.w(TAG, "Failed observing followed mods (using local cache)", e) }
+                .collect { remoteMods ->
+                    val remoteIds = remoteMods.map { it.publishedFileId }.toSet()
+                    removedModIds.retainAll(remoteIds)
+
+                    val currentMods = _uiState.value.followedMods
+                    val mergedMods = if (remoteMods.isEmpty() && currentMods.isNotEmpty() && removedModIds.isEmpty()) {
+                        // Do not let an empty offline Firestore cache wipe locally synced/bookmarked mods.
+                        currentMods
+                    } else {
+                        val keptPending = currentMods.filter { it.publishedFileId in pendingLocalModIds }
+                        val filteredRemote = remoteMods.filterNot { it.publishedFileId in removedModIds }
+                        (keptPending + filteredRemote)
+                            .distinctBy { it.publishedFileId }
+                            .sortedByDescending { maxOf(it.updatedEpochSec, it.updatedAt?.seconds ?: 0L) }
+                    }
+
+                    _uiState.update { it.copy(followedMods = mergedMods) }
+                    localStore?.saveFollowedMods(storeKey, mergedMods)
                 }
         }
 
         viewModelScope.launch {
             repo.observeSyncProfile(uid)
-                .catch { e -> Log.e(TAG, "Failed observing sync profile", e) }
-                .collect { profile ->
+                .catch { e -> Log.w(TAG, "Failed observing sync profile (using local cache)", e) }
+                .collect { remoteProfile ->
+                    if (remoteProfile == null) return@collect
                     _uiState.update { current ->
-                        val prefill = if (current.steamProfileInput.isBlank() && profile != null) {
-                            profile.profileInput.ifBlank { profile.steamId64 }
+                        val localProfile = current.syncProfile
+                        val effectiveProfile = if (hasPendingLocalSyncProfile && localProfile != null) {
+                            if (remoteProfile.steamId64 == localProfile.steamId64 &&
+                                remoteProfile.syncedCount == localProfile.syncedCount
+                            ) {
+                                hasPendingLocalSyncProfile = false
+                                remoteProfile
+                            } else {
+                                localProfile
+                            }
+                        } else {
+                            remoteProfile
+                        }
+                        val prefill = if (current.steamProfileInput.isBlank()) {
+                            effectiveProfile.profileInput.ifBlank { effectiveProfile.steamId64 }
                         } else {
                             current.steamProfileInput
                         }
+                        localStore?.saveSyncProfile(storeKey, effectiveProfile)
                         current.copy(
-                            syncProfile = profile,
+                            syncProfile = effectiveProfile,
                             steamProfileInput = prefill
                         )
                     }
@@ -171,71 +254,206 @@ class WorkshopViewModel(
     }
 
     fun toggleFollowGame(game: WorkshopGameSummary) {
-        val repo = followRepository
-        if (repo == null) {
-            _toastEvents.tryEmit("Logga in med Google för att följa spel.")
-            return
-        }
         val currentlyFollowed = _uiState.value.followedGameIds.contains(game.appId)
-        viewModelScope.launch {
-            val result = if (currentlyFollowed) {
-                repo.unfollowGame(game.appId)
+        val storeKey = storeUserKey()
+
+        val updatedGames = if (currentlyFollowed) {
+            pendingLocalGameIds.remove(game.appId)
+            removedGameIds.add(game.appId)
+            _uiState.value.followedGames.filterNot { it.appId == game.appId }
+        } else {
+            removedGameIds.remove(game.appId)
+            pendingLocalGameIds.add(game.appId)
+            val nowTs = Timestamp.now()
+            val newFollowed = FollowedWorkshopGame(
+                id = game.appId.toString(),
+                userId = userId.orEmpty(),
+                appId = game.appId,
+                gameName = game.name.trim().ifBlank { "Steam App #${game.appId}" }.take(160),
+                developer = game.developer.trim().take(120),
+                headerImageUrl = game.customImageUrl.ifBlank { game.headerImageUrl }.trim().take(500),
+                createdAt = nowTs,
+                updatedAt = nowTs
+            )
+            (listOf(newFollowed) + _uiState.value.followedGames).distinctBy { it.appId }
+        }
+
+        _uiState.update { it.copy(followedGames = updatedGames) }
+        localStore?.saveFollowedGames(storeKey, updatedGames)
+        lastFeedGameIds = updatedGames.map { it.appId }.toSet()
+        if (_uiState.value.activeSectionTab == WorkshopSectionTab.FOLLOWED || updatedGames.isEmpty()) {
+            refreshFollowedGamesFeed(updatedGames)
+        }
+
+        _toastEvents.tryEmit(
+            if (currentlyFollowed) {
+                "Slutade följa ${game.name}"
             } else {
-                repo.followGame(game)
+                "Följer nu ${game.name} i Mina & Följda"
             }
-            result.onSuccess {
-                _toastEvents.tryEmit(
+        )
+
+        val repo = followRepository ?: return
+        viewModelScope.launch {
+            try {
+                val res = if (currentlyFollowed) {
+                    repo.unfollowGame(game.appId)
+                } else {
+                    repo.followGame(game)
+                }
+                res.onSuccess {
                     if (currentlyFollowed) {
-                        "Slutade följa ${game.name}"
+                        removedGameIds.remove(game.appId)
                     } else {
-                        "Följer nu ${game.name} i Mina & Följda"
+                        pendingLocalGameIds.remove(game.appId)
                     }
-                )
-            }.onFailure { err ->
-                _toastEvents.tryEmit(err.localizedMessage ?: "Kunde inte uppdatera följda spel.")
+                }.onFailure { err ->
+                    Log.w(TAG, "Background Firestore follow sync deferred for appId=${game.appId}", err)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Background Firestore follow sync failed cleanly for appId=${game.appId}", e)
             }
         }
     }
 
     fun toggleBookmarkMod(mod: WorkshopModItem, gameNameOverride: String? = null) {
-        val repo = followRepository
-        if (repo == null) {
-            _toastEvents.tryEmit("Logga in med Google för att bokmärka moddar.")
-            return
-        }
+        val storeKey = storeUserKey()
+        val existingLocal = _uiState.value.followedMods.firstOrNull { it.publishedFileId == mod.publishedFileId }
         val resolvedGameName = gameNameOverride?.takeIf { it.isNotBlank() }
             ?: _uiState.value.selectedGame?.name
             ?: _uiState.value.followedGames.firstOrNull { it.appId == mod.appId }?.gameName
-            ?: _uiState.value.followedMods.firstOrNull { it.publishedFileId == mod.publishedFileId }?.gameName
+            ?: existingLocal?.gameName?.takeIf { it.isNotBlank() }
             ?: if (mod.appId > 0) "Steam App #${mod.appId}" else "Steam Workshop"
 
+        val nowTs = Timestamp.now()
+        val existingSource = existingLocal?.source
+        val isNowBookmarked: Boolean
+        val updatedMods = when (existingSource) {
+            WorkshopFollowSource.BOOKMARK -> {
+                isNowBookmarked = false
+                pendingLocalModIds.remove(mod.publishedFileId)
+                removedModIds.add(mod.publishedFileId)
+                _uiState.value.followedMods.filterNot { it.publishedFileId == mod.publishedFileId }
+            }
+
+            WorkshopFollowSource.BOTH -> {
+                isNowBookmarked = false
+                removedModIds.remove(mod.publishedFileId)
+                pendingLocalModIds.add(mod.publishedFileId)
+                _uiState.value.followedMods.map { item ->
+                    if (item.publishedFileId == mod.publishedFileId) {
+                        item.copy(source = WorkshopFollowSource.STEAM_SYNC, updatedAt = nowTs)
+                    } else {
+                        item
+                    }
+                }
+            }
+
+            WorkshopFollowSource.STEAM_SYNC -> {
+                isNowBookmarked = true
+                removedModIds.remove(mod.publishedFileId)
+                pendingLocalModIds.add(mod.publishedFileId)
+                _uiState.value.followedMods.map { item ->
+                    if (item.publishedFileId == mod.publishedFileId) {
+                        item.copy(
+                            gameName = resolvedGameName.ifBlank { item.gameName },
+                            title = mod.title.ifBlank { item.title },
+                            author = mod.author.ifBlank { item.author },
+                            previewUrl = mod.previewUrl.ifBlank { item.previewUrl },
+                            source = WorkshopFollowSource.BOTH,
+                            updatedAt = nowTs
+                        )
+                    } else {
+                        item
+                    }
+                }
+            }
+
+            else -> {
+                isNowBookmarked = true
+                removedModIds.remove(mod.publishedFileId)
+                pendingLocalModIds.add(mod.publishedFileId)
+                val newMod = FollowedWorkshopMod(
+                    id = mod.publishedFileId,
+                    userId = userId.orEmpty(),
+                    publishedFileId = mod.publishedFileId,
+                    appId = mod.appId.coerceIn(0, 100_000_000),
+                    gameName = resolvedGameName,
+                    title = mod.title.trim().ifBlank { "Workshop Item #${mod.publishedFileId}" }.take(240),
+                    author = mod.author.trim().take(120),
+                    previewUrl = mod.previewUrl.trim().take(600),
+                    itemUrl = mod.itemUrl.trim()
+                        .ifBlank { "https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.publishedFileId}" }
+                        .take(400),
+                    source = WorkshopFollowSource.BOOKMARK,
+                    updatedEpochSec = (mod.updatedEpochSec ?: 0L).coerceAtLeast(0L),
+                    subscriptions = (mod.subscriptions ?: 0L).coerceAtLeast(0L),
+                    createdAt = nowTs,
+                    updatedAt = nowTs
+                )
+                (listOf(newMod) + _uiState.value.followedMods)
+                    .distinctBy { it.publishedFileId }
+                    .sortedByDescending { maxOf(it.updatedEpochSec, it.updatedAt?.seconds ?: 0L) }
+            }
+        }
+
+        _uiState.update { it.copy(followedMods = updatedMods) }
+        localStore?.saveFollowedMods(storeKey, updatedMods)
+
+        _toastEvents.tryEmit(
+            if (isNowBookmarked) {
+                "Bokmärkte \"${mod.title}\""
+            } else {
+                "Tog bort bokmärket för \"${mod.title}\""
+            }
+        )
+
+        val repo = followRepository ?: return
         viewModelScope.launch {
-            repo.toggleBookmarkMod(mod, resolvedGameName)
-                .onSuccess { isBookmarked ->
-                    _toastEvents.tryEmit(
-                        if (isBookmarked) {
-                            "Bokmärkte \"${mod.title}\""
+            try {
+                repo.toggleBookmarkMod(mod, resolvedGameName, existingSource)
+                    .onSuccess {
+                        if (isNowBookmarked || existingSource == WorkshopFollowSource.BOTH) {
+                            pendingLocalModIds.remove(mod.publishedFileId)
                         } else {
-                            "Tog bort bokmärket för \"${mod.title}\""
+                            removedModIds.remove(mod.publishedFileId)
                         }
-                    )
-                }
-                .onFailure { err ->
-                    _toastEvents.tryEmit(err.localizedMessage ?: "Kunde inte spara mod-bokmärke.")
-                }
+                    }
+                    .onFailure { err ->
+                        Log.w(TAG, "Background Firestore bookmark sync deferred for ${mod.publishedFileId}", err)
+                    }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Background Firestore bookmark sync failed cleanly for ${mod.publishedFileId}", e)
+            }
         }
     }
 
     fun removeFollowedMod(publishedFileId: String) {
+        val storeKey = storeUserKey()
+        pendingLocalModIds.remove(publishedFileId)
+        removedModIds.add(publishedFileId)
+        val updatedMods = _uiState.value.followedMods.filterNot { it.publishedFileId == publishedFileId }
+        _uiState.update { it.copy(followedMods = updatedMods) }
+        localStore?.saveFollowedMods(storeKey, updatedMods)
+        _toastEvents.tryEmit("Tog bort modden från Mina & Följda")
+
         val repo = followRepository ?: return
         viewModelScope.launch {
-            repo.removeFollowedMod(publishedFileId)
-                .onSuccess {
-                    _toastEvents.tryEmit("Tog bort modden från Mina & Följda")
-                }
-                .onFailure { err ->
-                    _toastEvents.tryEmit(err.localizedMessage ?: "Kunde inte ta bort modden.")
-                }
+            try {
+                repo.removeFollowedMod(publishedFileId)
+                    .onSuccess { removedModIds.remove(publishedFileId) }
+                    .onFailure { err ->
+                        Log.w(TAG, "Background Firestore mod removal deferred for $publishedFileId", err)
+                    }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Background Firestore mod removal failed cleanly for $publishedFileId", e)
+            }
         }
     }
 
@@ -305,13 +523,6 @@ class WorkshopViewModel(
     }
 
     fun syncSteamSubscriptions() {
-        val repo = followRepository
-        if (repo == null) {
-            _uiState.update {
-                it.copy(steamSyncState = SteamSyncUiState.Error("Du måste vara inloggad med Google för att synka moddar."))
-            }
-            return
-        }
         val rawInput = _uiState.value.steamProfileInput.trim()
         if (rawInput.isBlank()) {
             _uiState.update {
@@ -320,45 +531,105 @@ class WorkshopViewModel(
             return
         }
 
+        val storeKey = storeUserKey()
         syncSteamJob?.cancel()
         syncSteamJob = viewModelScope.launch {
             _uiState.update { it.copy(steamSyncState = SteamSyncUiState.Syncing) }
             try {
+                // Step 1: Fetch and parse directly from steamcommunity.com FIRST, completely decoupled from Firestore.
                 val syncResult = repository.fetchSubscribedWorkshopMods(rawInput)
-                val saveRes = repo.syncSubscribedMods(
+                val nowTs = Timestamp.now()
+                val newProfile = SteamWorkshopSyncProfile(
+                    id = WorkshopFollowRepository.SYNC_DOC_ID,
+                    userId = userId.orEmpty(),
                     steamId64 = syncResult.steamId64,
                     profileInput = rawInput,
-                    syncedMods = syncResult.mods
+                    syncedCount = syncResult.mods.size,
+                    createdAt = _uiState.value.syncProfile?.createdAt ?: nowTs,
+                    updatedAt = nowTs
                 )
-                saveRes.onSuccess { count ->
-                    if (count > 0) {
-                        _uiState.update {
-                            it.copy(
-                                steamSyncState = SteamSyncUiState.Success(syncResult.steamId64, count),
-                                showSteamSyncDialog = false
-                            )
+
+                if (syncResult.mods.isNotEmpty()) {
+                    // Step 2: Merge into UI & local persistent store immediately so the user sees mods even offline.
+                    val existingById = _uiState.value.followedMods.associateBy { it.publishedFileId }
+                    val syncedById = linkedMapOf<String, FollowedWorkshopMod>()
+                    syncResult.mods.forEach { mod ->
+                        val existing = existingById[mod.publishedFileId]
+                        val targetSource = if (
+                            existing?.source == WorkshopFollowSource.BOOKMARK ||
+                            existing?.source == WorkshopFollowSource.BOTH
+                        ) {
+                            WorkshopFollowSource.BOTH
+                        } else {
+                            WorkshopFollowSource.STEAM_SYNC
                         }
-                        _toastEvents.tryEmit("Synkade $count prenumererade moddar från Steam")
-                    } else {
-                        _uiState.update {
-                            it.copy(
-                                steamSyncState = SteamSyncUiState.EmptyDiagnostic(
-                                    steamId64 = syncResult.steamId64,
-                                    queriedUrl = syncResult.queriedUrl,
-                                    httpStatusCode = syncResult.httpStatusCode,
-                                    message = "0 publika Steam-prenumerationer returnerades. Kontrollera att \"Speldetaljer\" (Game details) är inställt på Offentlig i Steams sekretessinställningar."
-                                ),
-                                showSteamSyncDialog = true
-                            )
-                        }
+                        removedModIds.remove(mod.publishedFileId)
+                        pendingLocalModIds.add(mod.publishedFileId)
+                        syncedById[mod.publishedFileId] = mod.copy(
+                            id = mod.publishedFileId,
+                            userId = userId.orEmpty(),
+                            source = targetSource,
+                            createdAt = existing?.createdAt ?: nowTs,
+                            updatedAt = nowTs
+                        )
                     }
-                }.onFailure { err ->
+                    val preservedBookmarks = _uiState.value.followedMods.filter {
+                        it.publishedFileId !in syncedById
+                    }
+                    val mergedMods = (syncedById.values + preservedBookmarks)
+                        .distinctBy { it.publishedFileId }
+                        .sortedByDescending { maxOf(it.updatedEpochSec, it.updatedAt?.seconds ?: 0L) }
+
+                    hasPendingLocalSyncProfile = true
+                    localStore?.saveFollowedMods(storeKey, mergedMods)
+                    localStore?.saveSyncProfile(storeKey, newProfile)
+
                     _uiState.update {
                         it.copy(
-                            steamSyncState = SteamSyncUiState.Error(
-                                err.localizedMessage ?: "Kunde inte spara synkade moddar i molnet."
-                            )
+                            followedMods = mergedMods,
+                            syncProfile = newProfile,
+                            steamSyncState = SteamSyncUiState.Success(syncResult.steamId64, syncResult.mods.size),
+                            showSteamSyncDialog = false
                         )
+                    }
+                    _toastEvents.tryEmit("Synkade ${syncResult.mods.size} prenumererade moddar från Steam")
+                } else {
+                    hasPendingLocalSyncProfile = true
+                    localStore?.saveSyncProfile(storeKey, newProfile)
+                    _uiState.update {
+                        it.copy(
+                            syncProfile = newProfile,
+                            steamSyncState = SteamSyncUiState.EmptyDiagnostic(
+                                steamId64 = syncResult.steamId64,
+                                queriedUrl = syncResult.queriedUrl,
+                                httpStatusCode = syncResult.httpStatusCode,
+                                message = "0 publika Steam-prenumerationer returnerades. Kontrollera att \"Speldetaljer\" (Game details) är inställt på Offentlig i Steams sekretessinställningar."
+                            ),
+                            showSteamSyncDialog = true
+                        )
+                    }
+                }
+
+                // Step 3: Non-blocking background sync to Firestore; never fails or blocks the Steam dialog.
+                val repo = followRepository
+                if (repo != null && !userId.isNullOrBlank()) {
+                    viewModelScope.launch {
+                        try {
+                            repo.syncSubscribedMods(
+                                steamId64 = syncResult.steamId64,
+                                profileInput = rawInput,
+                                syncedMods = syncResult.mods
+                            ).onSuccess {
+                                pendingLocalModIds.removeAll(syncResult.mods.map { it.publishedFileId }.toSet())
+                                hasPendingLocalSyncProfile = false
+                            }.onFailure { err ->
+                                Log.w(TAG, "Background Firestore sync deferred after Steam fetch", err)
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Background Firestore sync failed cleanly after Steam fetch", e)
+                        }
                     }
                 }
             } catch (e: CancellationException) {
