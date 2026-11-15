@@ -278,7 +278,19 @@ class WorkshopViewModel(
             (listOf(newFollowed) + _uiState.value.followedGames).distinctBy { it.appId }
         }
 
-        _uiState.update { it.copy(followedGames = updatedGames) }
+        _uiState.update { current ->
+            val nextFeedState = if (updatedGames.isEmpty()) {
+                WorkshopFollowedFeedUiState.Idle
+            } else if (current.activeSectionTab != WorkshopSectionTab.FOLLOWED) {
+                WorkshopFollowedFeedUiState.Idle
+            } else {
+                current.followedNewModsFeed
+            }
+            current.copy(
+                followedGames = updatedGames,
+                followedNewModsFeed = nextFeedState
+            )
+        }
         localStore?.saveFollowedGames(storeKey, updatedGames)
         lastFeedGameIds = updatedGames.map { it.appId }.toSet()
         if (_uiState.value.activeSectionTab == WorkshopSectionTab.FOLLOWED || updatedGames.isEmpty()) {
@@ -592,7 +604,7 @@ class WorkshopViewModel(
                             showSteamSyncDialog = false
                         )
                     }
-                    _toastEvents.tryEmit("Synkade ${syncResult.mods.size} prenumererade moddar från Steam")
+                    _toastEvents.tryEmit("Synkade ${syncResult.mods.size} Steam-favoriter")
                 } else {
                     hasPendingLocalSyncProfile = true
                     localStore?.saveSyncProfile(storeKey, newProfile)
@@ -603,7 +615,7 @@ class WorkshopViewModel(
                                 steamId64 = syncResult.steamId64,
                                 queriedUrl = syncResult.queriedUrl,
                                 httpStatusCode = syncResult.httpStatusCode,
-                                message = "0 publika Steam-prenumerationer returnerades. Kontrollera att \"Speldetaljer\" (Game details) är inställt på Offentlig i Steams sekretessinställningar."
+                                message = "0 publika Steam-favoriter (myfavorites) hittades. Steam begränsar \"mysubscriptions\" till inloggade webbläsarsessioner — stjärnmarkera/favoritmarkera moddar på Steam (\"Favoriter\") eller bokmärk dem direkt i SteamPulse."
                             ),
                             showSteamSyncDialog = true
                         )
@@ -643,7 +655,7 @@ class WorkshopViewModel(
                 _uiState.update {
                     it.copy(
                         steamSyncState = SteamSyncUiState.Error(
-                            e.localizedMessage ?: "Kunde inte synka Steam-prenumerationer."
+                            e.localizedMessage ?: "Kunde inte synka Steam-favoriter."
                         )
                     )
                 }

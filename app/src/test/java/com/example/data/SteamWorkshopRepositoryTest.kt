@@ -252,7 +252,11 @@ class SteamWorkshopRepositoryTest {
             )
         )
         assertEquals(
-            "https://steamcommunity.com/profiles/76561198012345678/myworkshopfiles/?browsefilter=mysubscriptions&p=1&numperpage=30",
+            "https://steamcommunity.com/profiles/76561198012345678/myworkshopfiles/?browsefilter=myfavorites&p=1&numperpage=30",
+            SteamWorkshopRepository.buildFavoriteWorkshopUrl("76561198012345678", 1)
+        )
+        assertEquals(
+            "https://steamcommunity.com/profiles/76561198012345678/myworkshopfiles/?browsefilter=myfavorites&p=1&numperpage=30",
             SteamWorkshopRepository.buildSubscribedWorkshopUrl("76561198012345678", 1)
         )
         assertEquals(

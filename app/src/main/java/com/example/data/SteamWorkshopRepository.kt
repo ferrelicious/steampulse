@@ -411,11 +411,11 @@ class SteamWorkshopRepository(
     ): SteamSubscribedSyncResult = withContext(Dispatchers.IO) {
         val steamId64 = resolveSteamId64(rawProfileInput)
         val collectedRaw = linkedMapOf<String, WorkshopModItem>()
-        var firstUrl = buildSubscribedWorkshopUrl(steamId64, 1)
+        var firstUrl = buildFavoriteWorkshopUrl(steamId64, 1)
         var firstStatusCode = 200
 
         for (page in 1..3) {
-            val url = buildSubscribedWorkshopUrl(steamId64, page)
+            val url = buildFavoriteWorkshopUrl(steamId64, page)
             val outcome = executeSteamGet(url)
             if (page == 1) {
                 firstUrl = outcome.requestedUrl
@@ -580,7 +580,7 @@ class SteamWorkshopRepository(
         const val STEAM_AGE_BYPASS_COOKIE =
             "birthtime=0; lastagecheckage=1-0-1990; wants_mature_content=1"
         private const val PRIVATE_PROFILE_ERROR_MSG =
-            "Din Steam-profil eller dina Speldetaljer (Game Details) är privata. Ställ in både Profil och Speldetaljer till Offentlig på Steam för att kunna synka prenumerationer."
+            "Din Steam-profil eller dina Speldetaljer (Game Details) är privata. Ställ in både Profil och Speldetaljer till Offentlig på Steam för att kunna synka dina publika favoriter."
 
         val KNOWN_WORKSHOP_APP_IDS: Set<Int> = setOf(
             4000,    // Garry's Mod
@@ -694,9 +694,12 @@ class SteamWorkshopRepository(
         private val DETAIL_DESC_REGEX = Regex("""id="highlightContent"[^>]*>(.*?)</div>\s*</div>""", RegexOption.DOT_MATCHES_ALL)
         private val SUBSCRIBERS_STAT_REGEX = Regex("""<tr>\s*<td>([\d, ]+)</td>\s*<td>\s*Current Subscribers""", RegexOption.IGNORE_CASE)
 
-        fun buildSubscribedWorkshopUrl(steamId64: String, page: Int = 1): String {
-            return "https://steamcommunity.com/profiles/$steamId64/myworkshopfiles/?browsefilter=mysubscriptions&p=$page&numperpage=30"
+        fun buildFavoriteWorkshopUrl(steamId64: String, page: Int = 1): String {
+            return "https://steamcommunity.com/profiles/$steamId64/myworkshopfiles/?browsefilter=myfavorites&p=$page&numperpage=30"
         }
+
+        fun buildSubscribedWorkshopUrl(steamId64: String, page: Int = 1): String =
+            buildFavoriteWorkshopUrl(steamId64, page)
 
         fun extractSteamId64FromInput(rawInput: String): String? {
             val trimmed = rawInput.trim()

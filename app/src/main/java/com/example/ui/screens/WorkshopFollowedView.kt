@@ -102,15 +102,7 @@ internal fun WorkshopFollowedView(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 1. Steam Subscribed Mods Sync Banner
-        item(key = "steam_sync_banner") {
-            SteamSyncStatusCard(
-                uiState = uiState,
-                onOpenSteamSyncDialog = onOpenSteamSyncDialog
-            )
-        }
-
-        // 2. Followed Games & New Mods Feed Header
+        // 1. Followed Games & New Mods Feed Header (always prominent at the top)
         item(key = "followed_games_header") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -327,11 +319,11 @@ internal fun WorkshopFollowedView(
             }
         }
 
-        // 3. Bookmarked & Steam-Subscribed Mods Section
+        // 2. Bookmarked Mods & Synced Steam Favorites Section
         item(key = "saved_mods_header") {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "FÖLJDA & PRENUMERERADE MODDAR (${uiState.followedMods.size})",
+                text = "BOKMÄRKTA MODDAR & STEAM-FAVORITER (${uiState.followedMods.size})",
                 style = MaterialTheme.typography.labelSmall,
                 color = SteamNeon
             )
@@ -352,12 +344,12 @@ internal fun WorkshopFollowedView(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "Inga bokmärkta eller synkade moddar än",
+                            text = "Inga bokmärkta moddar eller Steam-favoriter än",
                             style = MaterialTheme.typography.titleSmall,
                             color = SteamTextPrimary
                         )
                         Text(
-                            text = "Tryck på hjärtat på valfri modd eller synka dina Steam-prenumerationer ovan för att samla alla dina moddar här.",
+                            text = "Tryck på hjärtat på valfri modd i SteamPulse, eller favoritmarkera moddar på Steam och synka dina publika Favoriter nedan.",
                             style = MaterialTheme.typography.bodySmall,
                             color = SteamTextSecondary
                         )
@@ -378,6 +370,15 @@ internal fun WorkshopFollowedView(
                     onRemove = { onRemoveFollowedMod(savedMod.publishedFileId) }
                 )
             }
+        }
+
+        // 3. Steam Public Favorites Sync Banner
+        item(key = "steam_sync_banner") {
+            Spacer(modifier = Modifier.height(4.dp))
+            SteamSyncStatusCard(
+                uiState = uiState,
+                onOpenSteamSyncDialog = onOpenSteamSyncDialog
+            )
         }
     }
 }
@@ -419,7 +420,7 @@ private fun SteamSyncStatusCard(
                     tint = SteamNeon
                 )
                 Text(
-                    text = "STEAM-PRENUMERATIONER",
+                    text = "STEAM-FAVORITER (MYFAVORITES)",
                     fontFamily = JetBrainsMonoFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
@@ -429,23 +430,23 @@ private fun SteamSyncStatusCard(
 
             if (profile != null) {
                 Text(
-                    text = "Kopplad till SteamID ${profile.steamId64} • ${profile.syncedCount} synkade moddar",
+                    text = "Kopplad till SteamID ${profile.steamId64} • ${profile.syncedCount} synkade favoriter",
                     style = MaterialTheme.typography.titleSmall,
                     color = SteamTextPrimary
                 )
                 Text(
-                    text = "Uppdateras från din publika Steam-prenumerationslista och sparas i ditt SteamPulse-konto.",
+                    text = "Hämtar dina publika Steam-favoriter (myfavorites). Steam döljer prenumerationer utanför webbläsaren, så använd stjärna/Favorit på Steam eller hjärtat här i appen.",
                     style = MaterialTheme.typography.bodySmall,
                     color = SteamTextSecondary
                 )
             } else {
                 Text(
-                    text = "Importera moddar du prenumererar på i Steam",
+                    text = "Importera dina publika Steam-favoriter",
                     style = MaterialTheme.typography.titleSmall,
                     color = SteamTextPrimary
                 )
                 Text(
-                    text = "Ange ditt SteamID64 eller din Steam-profil-URL så hämtar vi alla dina prenumererade moddar automatiskt.",
+                    text = "Steam begränsar prenumerationer till inloggade sessioner. Stjärnmarkera/favoritmarkera moddar på Steam (\"Favoriter\") så hämtar vi dem automatiskt, eller bokmärk direkt i SteamPulse.",
                     style = MaterialTheme.typography.bodySmall,
                     color = SteamTextSecondary
                 )
@@ -497,7 +498,7 @@ private fun SteamSyncStatusCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "Synka Steam-prenumerationer",
+                    text = "Synka Steam-favoriter",
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     softWrap = false
@@ -607,7 +608,7 @@ private fun FollowedSavedModCard(
         savedMod.source == WorkshopFollowSource.BOTH
     val sourceLabel = when (savedMod.source) {
         WorkshopFollowSource.BOTH -> "Bokmärkt • Steam"
-        WorkshopFollowSource.STEAM_SYNC -> "Steam-prenumeration"
+        WorkshopFollowSource.STEAM_SYNC -> "Steam-favorit"
         else -> "Bokmärkt"
     }
     val badgeColor = when (savedMod.source) {
@@ -782,7 +783,7 @@ internal fun SteamSyncSubscriptionsDialog(
                     tint = SteamNeon
                 )
                 Text(
-                    text = "Synka Steam-prenumerationer",
+                    text = "Synka Steam-favoriter",
                     style = MaterialTheme.typography.titleMedium
                 )
             }
@@ -790,7 +791,7 @@ internal fun SteamSyncSubscriptionsDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Ange ditt 17-siffriga SteamID64 eller din Steam-profil-URL (t.ex. steamcommunity.com/id/dittnamn eller .../profiles/7656119...).",
+                    text = "Steam begränsar prenumerationer (mysubscriptions) till inloggade webbläsarsessioner. Stjärnmarkera/favoritmarkera moddar på Steam (\"Favoriter\") eller bokmärk dem direkt i SteamPulse, och ange ditt 17-siffriga SteamID64 eller Steam-profil-URL nedan.",
                     style = MaterialTheme.typography.bodySmall,
                     color = SteamTextSecondary
                 )
@@ -822,7 +823,7 @@ internal fun SteamSyncSubscriptionsDialog(
                         .testTag("steam_sync_profile_input")
                 )
                 Text(
-                    text = "Obs: Din Steam-profil och \"Speldetaljer\" (Game Details) måste vara inställda på Offentlig i Steams sekretessinställningar.",
+                    text = "Obs: Din Steam-profil och \"Speldetaljer\" (Game Details) måste vara inställda på Offentlig i Steams sekretessinställningar för att dina publika Steam-favoriter ska kunna läsas.",
                     style = MaterialTheme.typography.labelSmall,
                     color = SteamTextMuted
                 )
