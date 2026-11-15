@@ -179,10 +179,23 @@ sealed interface WorkshopFollowedFeedUiState {
     data class Error(val message: String) : WorkshopFollowedFeedUiState
 }
 
+data class SteamSubscribedSyncResult(
+    val steamId64: String,
+    val mods: List<FollowedWorkshopMod>,
+    val queriedUrl: String,
+    val httpStatusCode: Int
+)
+
 sealed interface SteamSyncUiState {
     data object Idle : SteamSyncUiState
     data object Syncing : SteamSyncUiState
     data class Success(val steamId64: String, val syncedCount: Int) : SteamSyncUiState
+    data class EmptyDiagnostic(
+        val steamId64: String,
+        val queriedUrl: String,
+        val httpStatusCode: Int,
+        val message: String
+    ) : SteamSyncUiState
     data class Error(val message: String) : SteamSyncUiState
 }
 

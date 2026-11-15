@@ -70,6 +70,7 @@ import com.example.model.WorkshopGameSummary
 import com.example.model.WorkshopModItem
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
+import com.example.ui.theme.SteamAmber
 import com.example.ui.theme.SteamBg
 import com.example.ui.theme.SteamBorder
 import com.example.ui.theme.SteamCard
@@ -450,6 +451,33 @@ private fun SteamSyncStatusCard(
                 )
             }
 
+            if (uiState.steamSyncState is SteamSyncUiState.EmptyDiagnostic) {
+                val diag = uiState.steamSyncState
+                Surface(
+                    color = SteamAmber.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, SteamAmber.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = diag.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SteamAmber
+                        )
+                        Text(
+                            text = "HTTP ${diag.httpStatusCode} • ${diag.queriedUrl}",
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontSize = 10.sp,
+                            color = SteamTextMuted
+                        )
+                    }
+                }
+            }
+
             Button(
                 onClick = onOpenSteamSyncDialog,
                 colors = ButtonDefaults.buttonColors(
@@ -799,32 +827,75 @@ internal fun SteamSyncSubscriptionsDialog(
                     color = SteamTextMuted
                 )
 
-                if (syncState is SteamSyncUiState.Error) {
-                    Surface(
-                        color = SteamDanger.copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, SteamDanger.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top
+                when (syncState) {
+                    is SteamSyncUiState.Error -> {
+                        Surface(
+                            color = SteamDanger.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, SteamDanger.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ErrorOutline,
-                                contentDescription = null,
-                                tint = SteamDanger,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = syncState.message,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = SteamDanger,
-                                modifier = Modifier.testTag("steam_sync_error_message")
-                            )
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = SteamDanger,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = syncState.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SteamDanger,
+                                    modifier = Modifier.testTag("steam_sync_error_message")
+                                )
+                            }
                         }
                     }
+
+                    is SteamSyncUiState.EmptyDiagnostic -> {
+                        Surface(
+                            color = SteamAmber.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, SteamAmber.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(10.dp)
+                                    .testTag("steam_sync_diagnostic_message"),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = SteamAmber,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = syncState.message,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SteamAmber
+                                    )
+                                }
+                                Text(
+                                    text = "URL: ${syncState.queriedUrl}\nStatus: HTTP ${syncState.httpStatusCode} • 0 träffar",
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontSize = 10.sp,
+                                    color = SteamTextSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    else -> Unit
                 }
             }
         },

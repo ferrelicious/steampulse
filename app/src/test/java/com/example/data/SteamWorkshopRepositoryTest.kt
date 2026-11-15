@@ -242,6 +242,16 @@ class SteamWorkshopRepositoryTest {
     @Test
     fun parseSubscribedWorkshopItemsAndResolveProfileHelpers_workCleanly() {
         assertEquals(
+            "76561198012345678",
+            SteamWorkshopRepository.extractSteamId64FromInput("76561198012345678")
+        )
+        assertEquals(
+            "76561198012345678",
+            SteamWorkshopRepository.extractSteamId64FromInput(
+                "https://steamcommunity.com/profiles/76561198012345678/myworkshopfiles/?browsefilter=mysubscriptions"
+            )
+        )
+        assertEquals(
             "https://steamcommunity.com/profiles/76561198012345678/myworkshopfiles/?browsefilter=mysubscriptions&p=1&numperpage=30",
             SteamWorkshopRepository.buildSubscribedWorkshopUrl("76561198012345678", 1)
         )
@@ -285,21 +295,20 @@ class SteamWorkshopRepositoryTest {
     }
 
     @Test
-    fun isPrivateSteamProfileHtml_detectsPrivacyWallsAndIgnoresPublicPages() {
+    fun isPrivateSteamProfileHtml_onlyDetectsExplicitPrivateProfileMarkers() {
         assertTrue(
             SteamWorkshopRepository.isPrivateSteamProfileHtml(
-                """<div class="profile_private_info">This profile is private.</div>"""
+                """<div class="profile_private_info">Some text</div>"""
             )
         )
         assertTrue(
             SteamWorkshopRepository.isPrivateSteamProfileHtml(
-                """<p>This user's game details are private.</p>"""
+                """<div class="error">This profile is private.</div>"""
             )
         )
-        assertTrue(
+        assertFalse(
             SteamWorkshopRepository.isPrivateSteamProfileHtml(
-                body = "<html></html>",
-                finalUrl = "https://steamcommunity.com/login/home/?goto=myworkshopfiles"
+                """<form action="https://steamcommunity.com/login/home"></form><div class="no_workshop_items">No items found</div>"""
             )
         )
         assertFalse(

@@ -4,6 +4,7 @@ import android.text.Html
 import com.example.model.FollowedFeedModItem
 import com.example.model.FollowedWorkshopGame
 import com.example.model.FollowedWorkshopMod
+import com.example.model.SteamSubscribedSyncResult
 import com.example.model.WorkshopFollowSource
 import com.example.model.WorkshopGameSummary
 import com.example.model.WorkshopLeaderboardMode
@@ -381,16 +382,10 @@ class SteamWorkshopRepository(
             throw IOException("Ange ditt SteamID64 eller din Steam-profil-URL.")
         }
 
-        if (STEAM_ID64_EXACT_REGEX.matches(trimmed)) {
-            return@withContext trimmed
-        }
-
-        PROFILE_ID64_URL_REGEX.find(trimmed)?.groupValues?.getOrNull(1)?.let { extracted ->
-            return@withContext extracted
-        }
+        extractSteamId64FromInput(trimmed)?.let { return@withContext it }
 
         val vanity = extractVanityFromInput(trimmed)
-            ?: throw IOException("Ogiltigt format. Ange SteamID64 (17 siffror) eller länk som steamcommunity.com/id/dittnamn.")
+            ?: throw IOException("Ogiltigt format. Ange SteamID64 (17 siffror som börjar på 7656119) eller länk som steamcommunity.com/id/dittnamn.")
 
         val encodedVanity = URLEncoder.encode(vanity, "UTF-8")
         val xmlOutcome = executeSteamGet("https://steamcommunity.com/id/$encodedVanity/?xml=1")
@@ -403,7 +398,7 @@ class SteamWorkshopRepository(
         if (htmlOutcome.body.contains("The specified profile could not be found", ignoreCase = true)) {
             throw IOException("Hittade ingen Steam-profil för \"$vanity\". Kontrollera länken eller SteamID64.")
         }
-        if (isPrivateSteamProfileHtml(htmlOutcome.body, htmlOutcome.finalUrl)) {
+        if (isPrivateSteamProfileHtml(htmlOutcome.body)) {
             throw SteamProfilePrivateException(PRIVATE_PROFILE_ERROR_MSG)
         }
         parseSteamId64FromProfileResponse(htmlOutcome.body)?.let { return@withContext it }
@@ -413,14 +408,20 @@ class SteamWorkshopRepository(
 
     suspend fun fetchSubscribedWorkshopMods(
         rawProfileInput: String
-    ): Pair<String, List<FollowedWorkshopMod>> = withContext(Dispatchers.IO) {
+    ): SteamSubscribedSyncResult = withContext(Dispatchers.IO) {
         val steamId64 = resolveSteamId64(rawProfileInput)
         val collectedRaw = linkedMapOf<String, WorkshopModItem>()
+        var firstUrl = buildSubscribedWorkshopUrl(steamId64, 1)
+        var firstStatusCode = 200
 
         for (page in 1..3) {
             val url = buildSubscribedWorkshopUrl(steamId64, page)
             val outcome = executeSteamGet(url)
-            if (isPrivateSteamProfileHtml(outcome.body, outcome.finalUrl)) {
+            if (page == 1) {
+                firstUrl = outcome.requestedUrl
+                firstStatusCode = outcome.statusCode
+            }
+            if (isPrivateSteamProfileHtml(outcome.body)) {
                 throw SteamProfilePrivateException(PRIVATE_PROFILE_ERROR_MSG)
             }
             val parsed = parseWorkshopResponseBody(outcome.body, appId = 0)
@@ -436,7 +437,12 @@ class SteamWorkshopRepository(
         }
 
         if (collectedRaw.isEmpty()) {
-            return@withContext steamId64 to emptyList()
+            return@withContext SteamSubscribedSyncResult(
+                steamId64 = steamId64,
+                mods = emptyList(),
+                queriedUrl = firstUrl,
+                httpStatusCode = firstStatusCode
+            )
         }
 
         val allIds = collectedRaw.keys.toList()
@@ -481,7 +487,12 @@ class SteamWorkshopRepository(
             )
         }.sortedByDescending { it.updatedEpochSec }
 
-        steamId64 to firestoreMods
+        SteamSubscribedSyncResult(
+            steamId64 = steamId64,
+            mods = firestoreMods,
+            queriedUrl = firstUrl,
+            httpStatusCode = firstStatusCode
+        )
     }
 
     suspend fun fetchLatestModsForGames(
@@ -629,7 +640,7 @@ class SteamWorkshopRepository(
             976730   // Halo: The Master Chief Collection
         )
 
-        private val STEAM_ID64_EXACT_REGEX = Regex("""^\d{17}$""")
+        private val STEAM_ID64_REGEX = Regex("""\b7656119\d{10}\b""")
         private val PROFILE_ID64_URL_REGEX = Regex("""steamcommunity\.com/profiles/(\d{17})""", RegexOption.IGNORE_CASE)
         private val VANITY_URL_REGEX = Regex("""steamcommunity\.com/id/([^/?#]+)""", RegexOption.IGNORE_CASE)
         private val XML_STEAM_ID64_REGEX = Regex("""<steamID64>(\d{17})</steamID64>""", RegexOption.IGNORE_CASE)
@@ -687,6 +698,14 @@ class SteamWorkshopRepository(
             return "https://steamcommunity.com/profiles/$steamId64/myworkshopfiles/?browsefilter=mysubscriptions&p=$page&numperpage=30"
         }
 
+        fun extractSteamId64FromInput(rawInput: String): String? {
+            val trimmed = rawInput.trim()
+            if (trimmed.isBlank()) return null
+            STEAM_ID64_REGEX.find(trimmed)?.value?.let { return it }
+            PROFILE_ID64_URL_REGEX.find(trimmed)?.groupValues?.getOrNull(1)?.let { return it }
+            return null
+        }
+
         fun extractVanityFromInput(rawInput: String): String? {
             val trimmed = rawInput.trim()
             if (trimmed.isBlank()) return null
@@ -704,21 +723,10 @@ class SteamWorkshopRepository(
             return null
         }
 
-        fun isPrivateSteamProfileHtml(body: String, finalUrl: String = ""): Boolean {
-            if (finalUrl.contains("openid/login", ignoreCase = true) ||
-                finalUrl.contains("/login/home", ignoreCase = true)
-            ) {
-                return true
-            }
-            val lower = body.lowercase()
-            return lower.contains("profile_private_info") ||
-                lower.contains("this profile is private") ||
-                lower.contains("this user's profile is private") ||
-                lower.contains("game details are private") ||
-                lower.contains("game details are set to private") ||
-                lower.contains("den här profilen är privat") ||
-                lower.contains("you must be logged in to view") ||
-                lower.contains("action=\"https://steamcommunity.com/login/home")
+        fun isPrivateSteamProfileHtml(body: String): Boolean {
+            if (body.isBlank()) return false
+            return body.contains("This profile is private", ignoreCase = true) ||
+                body.contains("profile_private_info", ignoreCase = true)
         }
 
         fun buildBrowseCandidateUrls(

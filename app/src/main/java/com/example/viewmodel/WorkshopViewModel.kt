@@ -324,26 +324,34 @@ class WorkshopViewModel(
         syncSteamJob = viewModelScope.launch {
             _uiState.update { it.copy(steamSyncState = SteamSyncUiState.Syncing) }
             try {
-                val (steamId64, syncedMods) = repository.fetchSubscribedWorkshopMods(rawInput)
+                val syncResult = repository.fetchSubscribedWorkshopMods(rawInput)
                 val saveRes = repo.syncSubscribedMods(
-                    steamId64 = steamId64,
+                    steamId64 = syncResult.steamId64,
                     profileInput = rawInput,
-                    syncedMods = syncedMods
+                    syncedMods = syncResult.mods
                 )
                 saveRes.onSuccess { count ->
-                    _uiState.update {
-                        it.copy(
-                            steamSyncState = SteamSyncUiState.Success(steamId64, count),
-                            showSteamSyncDialog = false
-                        )
-                    }
-                    _toastEvents.tryEmit(
-                        if (count > 0) {
-                            "Synkade $count prenumererade moddar från Steam"
-                        } else {
-                            "Profilen synkad, men inga publika prenumerationer hittades"
+                    if (count > 0) {
+                        _uiState.update {
+                            it.copy(
+                                steamSyncState = SteamSyncUiState.Success(syncResult.steamId64, count),
+                                showSteamSyncDialog = false
+                            )
                         }
-                    )
+                        _toastEvents.tryEmit("Synkade $count prenumererade moddar från Steam")
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                steamSyncState = SteamSyncUiState.EmptyDiagnostic(
+                                    steamId64 = syncResult.steamId64,
+                                    queriedUrl = syncResult.queriedUrl,
+                                    httpStatusCode = syncResult.httpStatusCode,
+                                    message = "0 publika Steam-prenumerationer returnerades. Kontrollera att \"Speldetaljer\" (Game details) är inställt på Offentlig i Steams sekretessinställningar."
+                                ),
+                                showSteamSyncDialog = true
+                            )
+                        }
+                    }
                 }.onFailure { err ->
                     _uiState.update {
                         it.copy(
