@@ -2,12 +2,14 @@ package com.example.auth
 
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import com.example.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -28,6 +30,23 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 private const val TAG = "Auth"
+private const val FALLBACK_WEB_CLIENT_ID =
+    "116329660329-3pk93eilel8km7r1sh0u2q6lu9risl2h.apps.googleusercontent.com"
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private fun resolveWebClientId(context: Context): String {
+    return try {
+        context.getString(R.string.default_web_client_id).takeIf { it.isNotBlank() }
+            ?: FALLBACK_WEB_CLIENT_ID
+    } catch (_: Exception) {
+        FALLBACK_WEB_CLIENT_ID
+    }
+}
 
 fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
     val listener = FirebaseAuth.AuthStateListener { auth ->
@@ -48,12 +67,7 @@ fun attemptAutoSignIn(
         onAuthSuccess()
         return
     }
-    val clientId = try {
-        context.getString(R.string.default_web_client_id)
-    } catch (_: Exception) {
-        onUnauthenticated()
-        return
-    }
+    val clientId = resolveWebClientId(context)
 
     val googleIdOption = GetGoogleIdOption.Builder()
         .setFilterByAuthorizedAccounts(true)
@@ -67,7 +81,8 @@ fun attemptAutoSignIn(
 
     scope.launch {
         try {
-            val result = credentialManager.getCredential(context, request)
+            val activity = context.findActivity() ?: context
+            val result = credentialManager.getCredential(activity, request)
             val credential = result.credential
             if (credential is CustomCredential &&
                 credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -93,23 +108,32 @@ fun onGoogleSignInClicked(
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit = {}
 ) {
-    val clientId = try {
-        context.getString(R.string.default_web_client_id)
-    } catch (_: Exception) {
-        onAuthError("Google Sign-In-konfiguration saknas: default_web_client_id hittades inte.")
-        return
-    }
-
-    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-    val request = GetCredentialRequest.Builder()
-        .addCredentialOption(signInOption)
-        .build()
+    val clientId = resolveWebClientId(context)
 
     scope.launch {
         try {
-            val activity = context as? Activity
+            val activity = context.findActivity()
                 ?: throw IllegalStateException("Inloggning kräver en aktiv Activity-kontext.")
-            val result = credentialManager.getCredential(activity, request)
+
+            val result = try {
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val primaryRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+                credentialManager.getCredential(activity, primaryRequest)
+            } catch (primaryEx: GetCredentialException) {
+                Log.w(TAG, "Primary GetGoogleIdOption failed (${primaryEx.type}): ${primaryEx.message}")
+                val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInOption)
+                    .build()
+                credentialManager.getCredential(activity, fallbackRequest)
+            }
+
             val credential = result.credential
             if (credential is CustomCredential &&
                 credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -119,11 +143,17 @@ fun onGoogleSignInClicked(
                 Firebase.auth.signInWithCredential(authCredential).await()
                 onAuthSuccess()
             } else {
-                onAuthError("Oväntad autentiseringstyp mottagen.")
+                onAuthError("Oväntad autentiseringstyp mottagen: ${credential.type}")
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
+            if (!e.message.isNullOrBlank()) {
+                onAuthError("Avbruten (${e.type}): ${e.message}")
+            }
+        } catch (e: GetCredentialException) {
+            Log.e(TAG, "CredentialManager failed (${e.type}): ${e.message}", e)
+            onAuthError("Google-inloggning (${e.type}): ${e.message ?: "Okänt fel"}")
         } catch (e: Exception) {
             Log.e(TAG, "Google Sign-In failed", e)
             onAuthError(e.localizedMessage ?: "Inloggningen misslyckades.")
