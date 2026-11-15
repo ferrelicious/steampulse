@@ -1038,6 +1038,24 @@ private fun GameWorkshopDetailPage(
                                             style = MaterialTheme.typography.bodySmall,
                                             color = SteamTextSecondary
                                         )
+                                        val diagText = modsState.diagnosticInfo.ifBlank {
+                                            "AppID: ${game.appId} • Status: 200 • 0 träffar"
+                                        }
+                                        Surface(
+                                            color = SteamBg,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, SteamBorder)
+                                        ) {
+                                            Text(
+                                                text = diagText,
+                                                fontFamily = JetBrainsMonoFontFamily,
+                                                fontSize = 11.sp,
+                                                color = SteamTextMuted,
+                                                modifier = Modifier
+                                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                                    .testTag("workshop_empty_diagnostic")
+                                            )
+                                        }
                                         OutlinedButton(
                                             onClick = { openUrl(game.workshopHomeUrl) },
                                             border = BorderStroke(1.dp, SteamBorder),

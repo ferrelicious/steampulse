@@ -231,7 +231,7 @@ class WorkshopViewModel(
             }
 
             try {
-                val (fetchedMods, hasMore) = repository.fetchWorkshopMods(
+                val result = repository.fetchWorkshopMods(
                     appId = appId,
                     sortOrder = sortOrder,
                     searchQuery = query,
@@ -242,13 +242,14 @@ class WorkshopViewModel(
                 } else {
                     emptyList()
                 }
-                val merged = (previousMods + fetchedMods).distinctBy { it.publishedFileId }
+                val merged = (previousMods + result.mods).distinctBy { it.publishedFileId }
                 _uiState.update {
                     it.copy(
                         modsState = WorkshopModsUiState.Success(
                             mods = merged,
-                            hasMore = hasMore,
-                            currentPage = page
+                            hasMore = result.hasMore,
+                            currentPage = page,
+                            diagnosticInfo = result.diagnosticInfo
                         ),
                         isLoadingMoreMods = false
                     )

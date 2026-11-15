@@ -71,6 +71,12 @@ data class WorkshopModItem(
     val tags: List<String> = emptyList()
 )
 
+data class WorkshopModsFetchResult(
+    val mods: List<WorkshopModItem>,
+    val hasMore: Boolean,
+    val diagnosticInfo: String = ""
+)
+
 sealed interface WorkshopGamesUiState {
     data object Loading : WorkshopGamesUiState
     data class Success(val games: List<WorkshopGameSummary>) : WorkshopGamesUiState
@@ -82,7 +88,8 @@ sealed interface WorkshopModsUiState {
     data class Success(
         val mods: List<WorkshopModItem>,
         val hasMore: Boolean,
-        val currentPage: Int
+        val currentPage: Int,
+        val diagnosticInfo: String = ""
     ) : WorkshopModsUiState
     data class Error(val message: String) : WorkshopModsUiState
 }

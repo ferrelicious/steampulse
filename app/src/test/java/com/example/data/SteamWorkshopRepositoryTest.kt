@@ -140,5 +140,57 @@ class SteamWorkshopRepositoryTest {
             "birthtime=0; lastagecheckage=1-0-1990; wants_mature_content=1",
             SteamWorkshopRepository.STEAM_AGE_BYPASS_COOKIE
         )
+        assertTrue(defaultUrls.any { it.contains("ajax=1") })
+    }
+
+    @Test
+    fun parseWorkshopBrowseHtml_extractsBrowseRowAndSharedFileHoverAndRelativeLinks() {
+        val rowAndHoverHtml = """
+            <div class="workshopBrowsePaging">
+              <div class='workshopBrowseRow' id='sharedfile_33112200'>
+                <a href='/sharedfiles/filedetails/?searchtext=gun&id=33112200'>
+                  <img class='workshopItemPreviewImageRow' data-src='https://steamuserimages-a.akamaihd.net/ugc/row_preview.jpg' />
+                </a>
+                <a href='/sharedfiles/filedetails/?id=33112200'><span class='workshopItemTitle'>Tactical Overhaul Mod</span></a>
+                <span class='workshopItemAuthorName'>av <a href='/id/modauthor'>KalleMod</a></span>
+              </div>
+              <tr class="workshopBrowseRow">
+                <td><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=44556677">Ready or Not AI Fix</a></td>
+              </tr>
+              <script>
+                SharedFileBindMouseHover( "sharedfile_88990011", true, { "id": "88990011", "title": "Better Maps Pack", "author": "MapMaker" } );
+              </script>
+            </div>
+        """.trimIndent()
+
+        val items = SteamWorkshopRepository.parseWorkshopBrowseHtml(rowAndHoverHtml, 1144200)
+        assertEquals(3, items.size)
+
+        assertEquals("33112200", items[0].publishedFileId)
+        assertEquals("Tactical Overhaul Mod", items[0].title)
+        assertEquals("KalleMod", items[0].author)
+        assertEquals("https://steamuserimages-a.akamaihd.net/ugc/row_preview.jpg", items[0].previewUrl)
+
+        assertEquals("44556677", items[1].publishedFileId)
+        assertEquals("Ready or Not AI Fix", items[1].title)
+
+        assertEquals("88990011", items[2].publishedFileId)
+        assertEquals("Better Maps Pack", items[2].title)
+        assertEquals("MapMaker", items[2].author)
+    }
+
+    @Test
+    fun parseWorkshopResponseBody_unwrapsAjaxJsonResultsHtml() {
+        val ajaxJson = """
+            {
+              "total": 42,
+              "results_html": "<div class=\"workshopItem\"><a href=\"https://steamcommunity.com/sharedfiles/filedetails/?id=55667788\"><div class=\"workshopItemTitle\">AJAX Loaded Mod</div></a></div>"
+            }
+        """.trimIndent()
+
+        val items = SteamWorkshopRepository.parseWorkshopResponseBody(ajaxJson, 294100)
+        assertEquals(1, items.size)
+        assertEquals("55667788", items[0].publishedFileId)
+        assertEquals("AJAX Loaded Mod", items[0].title)
     }
 }
