@@ -141,6 +141,68 @@ class WorkshopLocalStore(
                 saveWorkshopLastVisitEpochSec(newUserId, guestVisit)
             }
         }
+        val notifKey = "${keyPrefix(newUserId)}new_mod_notifications_enabled"
+        if (!prefs.contains(notifKey)) {
+            val guestNotifKey = "${keyPrefix("guest")}new_mod_notifications_enabled"
+            if (prefs.contains(guestNotifKey)) {
+                setNewModNotificationsEnabled(newUserId, prefs.getBoolean(guestNotifKey, true))
+            }
+        }
+    }
+
+    fun getActiveUserId(): String {
+        return prefs.getString(KEY_ACTIVE_USER_ID, "guest")
+            ?.trim()
+            ?.ifBlank { "guest" }
+            ?: "guest"
+    }
+
+    fun setActiveUserId(userId: String) {
+        val clean = userId.trim().ifBlank { "guest" }
+        prefs.edit().putString(KEY_ACTIVE_USER_ID, clean).apply()
+    }
+
+    fun isNewModNotificationsEnabled(userId: String): Boolean {
+        return prefs.getBoolean("${keyPrefix(userId)}new_mod_notifications_enabled", true)
+    }
+
+    fun setNewModNotificationsEnabled(userId: String, enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("${keyPrefix(userId)}new_mod_notifications_enabled", enabled)
+            .apply()
+    }
+
+    fun getLastNotifiedEpochSec(userId: String, appId: Int): Long {
+        if (appId <= 0) return 0L
+        return prefs.getLong("${keyPrefix(userId)}last_notified_sec_$appId", 0L).coerceAtLeast(0L)
+    }
+
+    fun saveLastNotifiedEpochSec(userId: String, appId: Int, epochSec: Long) {
+        if (appId <= 0 || epochSec <= 0L) return
+        prefs.edit().putLong("${keyPrefix(userId)}last_notified_sec_$appId", epochSec).apply()
+    }
+
+    fun getLastNotifiedModIds(userId: String, appId: Int): Set<String> {
+        if (appId <= 0) return emptySet()
+        return prefs.getStringSet("${keyPrefix(userId)}last_notified_ids_$appId", emptySet())
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            .orEmpty()
+    }
+
+    fun saveLastNotifiedModIds(userId: String, appId: Int, modIds: Set<String>) {
+        if (appId <= 0) return
+        val capped = modIds.filter { it.isNotBlank() }.take(MAX_STORED_NOTIFIED_IDS).toSet()
+        prefs.edit().putStringSet("${keyPrefix(userId)}last_notified_ids_$appId", capped).apply()
+    }
+
+    fun clearLastNotifiedForGame(userId: String, appId: Int) {
+        if (appId <= 0) return
+        val prefix = keyPrefix(userId)
+        prefs.edit()
+            .remove("${prefix}last_notified_sec_$appId")
+            .remove("${prefix}last_notified_ids_$appId")
+            .apply()
     }
 
     fun getWorkshopLastVisitEpochSec(userId: String): Long {
@@ -258,5 +320,7 @@ class WorkshopLocalStore(
     companion object {
         private const val PREFS_NAME = "steam_pulse_workshop_local_store"
         private const val KEY_IS_GUEST_MODE = "app_is_guest_mode"
+        private const val KEY_ACTIVE_USER_ID = "app_active_user_id"
+        private const val MAX_STORED_NOTIFIED_IDS = 80
     }
 }

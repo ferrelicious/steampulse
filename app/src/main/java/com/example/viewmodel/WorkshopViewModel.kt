@@ -63,7 +63,8 @@ data class WorkshopScreenUiState(
     val steamSessionSteamId64: String = "",
     val previousWorkshopVisitEpochSec: Long = 0L,
     val activeGamePreviousVisitEpochSec: Long = 0L,
-    val followedGamesPreviousVisitEpochSec: Map<Int, Long> = emptyMap()
+    val followedGamesPreviousVisitEpochSec: Map<Int, Long> = emptyMap(),
+    val newModNotificationsEnabled: Boolean = true
 ) {
     val isShowingStoreSearch: Boolean
         get() = storeSearchResults != null
@@ -160,10 +161,23 @@ class WorkshopViewModel(
                 hasSteamSession = isSessionActive,
                 steamSessionSteamId64 = if (isSessionActive) sessionId64 else "",
                 previousWorkshopVisitEpochSec = prevWorkshopVisit,
-                followedGamesPreviousVisitEpochSec = followedPrevMap
+                followedGamesPreviousVisitEpochSec = followedPrevMap,
+                newModNotificationsEnabled = store.isNewModNotificationsEnabled(storeKey)
             )
         }
         lastFeedGameIds = snapshot.followedGames.map { it.appId }.toSet()
+    }
+
+    fun setNewModNotificationsEnabled(enabled: Boolean) {
+        val storeKey = storeUserKey()
+        localStore?.setNewModNotificationsEnabled(storeKey, enabled)
+        _uiState.update { it.copy(newModNotificationsEnabled = enabled) }
+    }
+
+    fun emitToast(message: String) {
+        if (message.isNotBlank()) {
+            _toastEvents.tryEmit(message)
+        }
     }
 
     fun markWorkshopVisited() {
@@ -365,6 +379,9 @@ class WorkshopViewModel(
             )
         }
         localStore?.saveFollowedGames(storeKey, updatedGames)
+        if (currentlyFollowed) {
+            localStore?.clearLastNotifiedForGame(storeKey, game.appId)
+        }
         lastFeedGameIds = updatedGames.map { it.appId }.toSet()
         if (_uiState.value.activeSectionTab == WorkshopSectionTab.FOLLOWED || updatedGames.isEmpty()) {
             refreshFollowedGamesFeed(updatedGames)

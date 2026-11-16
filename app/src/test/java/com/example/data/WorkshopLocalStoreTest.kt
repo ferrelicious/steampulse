@@ -149,5 +149,36 @@ class WorkshopLocalStoreTest {
         store.migrateGuestDataIfEmpty("u2")
         assertEquals(1_760_500_000L, store.getWorkshopLastVisitEpochSec("u2"))
     }
+
+    @Test
+    fun notificationPreferencesAndLastNotifiedState_persistAndMigrate() {
+        assertEquals("guest", store.getActiveUserId())
+        store.setActiveUserId("user_999")
+        assertEquals("user_999", store.getActiveUserId())
+
+        // Enabled by default
+        assertTrue(store.isNewModNotificationsEnabled("user_999"))
+        store.setNewModNotificationsEnabled("user_999", false)
+        assertFalse(store.isNewModNotificationsEnabled("user_999"))
+
+        // Last notified baseline per game
+        assertEquals(0L, store.getLastNotifiedEpochSec("user_999", 1643320))
+        assertTrue(store.getLastNotifiedModIds("user_999", 1643320).isEmpty())
+
+        store.saveLastNotifiedEpochSec("user_999", 1643320, 1_765_000_000L)
+        store.saveLastNotifiedModIds("user_999", 1643320, setOf("1001", "1002"))
+        assertEquals(1_765_000_000L, store.getLastNotifiedEpochSec("user_999", 1643320))
+        assertEquals(setOf("1001", "1002"), store.getLastNotifiedModIds("user_999", 1643320))
+
+        store.clearLastNotifiedForGame("user_999", 1643320)
+        assertEquals(0L, store.getLastNotifiedEpochSec("user_999", 1643320))
+        assertTrue(store.getLastNotifiedModIds("user_999", 1643320).isEmpty())
+
+        // Guest preference migration
+        store.setNewModNotificationsEnabled("guest", false)
+        store.migrateGuestDataIfEmpty("user_fresh")
+        assertFalse(store.isNewModNotificationsEnabled("user_fresh"))
+    }
 }
+
 

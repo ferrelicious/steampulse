@@ -30,6 +30,9 @@ import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.NotificationAdd
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Sync
@@ -47,6 +50,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -92,6 +97,10 @@ import java.util.Locale
 @Composable
 internal fun WorkshopFollowedView(
     uiState: WorkshopScreenUiState,
+    isNewModNotificationsActive: Boolean = false,
+    hasNotificationPermission: Boolean = true,
+    onToggleNewModNotifications: (Boolean) -> Unit = {},
+    onTestNotification: () -> Unit = {},
     onOpenGameWorkshop: (WorkshopGameSummary) -> Unit,
     onToggleFollowGame: (WorkshopGameSummary) -> Unit,
     onRefreshFollowedFeed: () -> Unit,
@@ -107,6 +116,16 @@ internal fun WorkshopFollowedView(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 0. Background New Mods Notification Settings Row
+        item(key = "notification_settings_row") {
+            WorkshopNotificationSettingsRow(
+                isEnabled = isNewModNotificationsActive,
+                hasPermission = hasNotificationPermission,
+                onToggle = onToggleNewModNotifications,
+                onTestNotification = onTestNotification
+            )
+        }
+
         // 1. Followed Games & New Mods Feed Header (always prominent at the top)
         item(key = "followed_games_header") {
             Row(
@@ -393,6 +412,86 @@ internal fun WorkshopFollowedView(
                 uiState = uiState,
                 onOpenSteamSyncDialog = onOpenSteamSyncDialog,
                 onLogoutSteamSession = onLogoutSteamSession
+            )
+        }
+    }
+}
+
+@Composable
+private fun WorkshopNotificationSettingsRow(
+    isEnabled: Boolean,
+    hasPermission: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onTestNotification: () -> Unit
+) {
+    Surface(
+        color = SteamSurface,
+        border = BorderStroke(
+            1.dp,
+            if (isEnabled) SteamNeon.copy(alpha = 0.4f) else SteamBorder
+        ),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("workshop_notifications_settings_card")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = if (isEnabled) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                contentDescription = null,
+                tint = if (isEnabled) SteamNeon else SteamTextMuted,
+                modifier = Modifier.size(20.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Notiser för nya moddar",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = SteamTextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = when {
+                        isEnabled -> "Bakgrundskoll var 2:a timme"
+                        !hasPermission -> "Tryck på switchen för att tillåta notiser"
+                        else -> "Avstängd för följda spel"
+                    },
+                    fontSize = 11.sp,
+                    color = SteamTextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(
+                onClick = onTestNotification,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("test_new_mod_notification_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.NotificationAdd,
+                    contentDescription = "Testa notis",
+                    tint = SteamAccent,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color(0xFF020617),
+                    checkedTrackColor = SteamNeon,
+                    uncheckedThumbColor = SteamTextSecondary,
+                    uncheckedTrackColor = SteamCard,
+                    uncheckedBorderColor = SteamBorder
+                ),
+                modifier = Modifier.testTag("new_mod_notifications_switch")
             )
         }
     }

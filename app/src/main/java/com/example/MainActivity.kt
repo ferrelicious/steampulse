@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -94,6 +95,8 @@ import com.example.data.WorkshopFollowRepository
 import com.example.data.WorkshopLocalStore
 import com.example.firebase.configureAppCheck
 import com.example.model.CurrencyMode
+import com.example.model.WorkshopSectionTab
+import com.example.notifications.WorkshopNotificationHelper
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ImageStudioScreen
@@ -137,24 +140,41 @@ enum class AppTab(
 }
 
 class MainActivity : ComponentActivity() {
+    private var pendingNavigationIntent by mutableStateOf<Intent?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Step 1: Configure Firebase App Check with launch intent before any UI or ViewModels
         configureAppCheck(this, intent)
+        WorkshopNotificationHelper.createNotificationChannel(this)
+        pendingNavigationIntent = intent
 
         enableEdgeToEdge()
 
         setContent {
             SteamPulseTheme {
-                AppNavigation()
+                AppNavigation(
+                    launchIntent = pendingNavigationIntent,
+                    onConsumeLaunchIntent = { pendingNavigationIntent = null }
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingNavigationIntent = intent
     }
 }
 
 @Composable
-fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
+fun AppNavigation(
+    auth: FirebaseAuth = Firebase.auth,
+    launchIntent: Intent? = null,
+    onConsumeLaunchIntent: () -> Unit = {}
+) {
     val context = LocalContext.current
     val localStore = remember { WorkshopLocalStore(context) }
     var isGuestMode by remember { mutableStateOf(localStore.isGuestMode()) }
@@ -180,10 +200,15 @@ fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
         )
     } else {
         val effectiveUid = user?.uid ?: "guest"
+        LaunchedEffect(effectiveUid) {
+            localStore.setActiveUserId(effectiveUid)
+        }
         key(effectiveUid) {
             AuthenticatedAppShell(
                 currentUserId = effectiveUid,
                 isGuest = user == null,
+                launchIntent = launchIntent,
+                onConsumeLaunchIntent = onConsumeLaunchIntent,
                 onNavigateToLogin = {
                     localStore.setGuestMode(false)
                     isGuestMode = false
@@ -198,6 +223,8 @@ fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
 private fun AuthenticatedAppShell(
     currentUserId: String,
     isGuest: Boolean = false,
+    launchIntent: Intent? = null,
+    onConsumeLaunchIntent: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -253,6 +280,19 @@ private fun AuthenticatedAppShell(
     var showReleasePage by rememberSaveable { mutableStateOf(false) }
     var pendingAiPrompt by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(launchIntent) {
+        val targetTab = launchIntent?.getStringExtra(WorkshopNotificationHelper.EXTRA_OPEN_TAB)
+        if (targetTab == WorkshopNotificationHelper.TAB_WORKSHOP) {
+            showReleasePage = false
+            currentTab = AppTab.WORKSHOP
+            val targetSection = launchIntent.getStringExtra(WorkshopNotificationHelper.EXTRA_OPEN_WORKSHOP_SECTION)
+            if (targetSection == WorkshopNotificationHelper.SECTION_FOLLOWED) {
+                workshopViewModel.selectSectionTab(WorkshopSectionTab.FOLLOWED)
+            }
+            onConsumeLaunchIntent()
+        }
+    }
 
     LaunchedEffect(pulseViewModel, workshopViewModel) {
         launch {
@@ -617,7 +657,9 @@ private fun AuthenticatedAppShell(
                                     onDismissSteamWebViewLogin = workshopViewModel::dismissSteamWebViewLoginDialog,
                                     onSteamWebViewAuthenticated = workshopViewModel::onSteamWebViewAuthenticated,
                                     onLogoutSteamSession = workshopViewModel::logoutSteamSession,
-                                    onWorkshopVisited = workshopViewModel::markWorkshopVisited
+                                    onWorkshopVisited = workshopViewModel::markWorkshopVisited,
+                                    onSetNewModNotificationsEnabled = workshopViewModel::setNewModNotificationsEnabled,
+                                    onShowNotificationFeedback = workshopViewModel::emitToast
                                 )
 
                                 AppTab.WATCHLIST -> WatchlistScreen(

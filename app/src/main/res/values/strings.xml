@@ -6,4 +6,6 @@
     <string name="release_repo_placeholder">t.ex. dittnamn/steampulse-android</string>
     <string name="workshop_title">Steam Workshop</string>
     <string name="workshop_subtitle">Topp 100 populära spel &amp; community-moddar</string>
+    <string name="workshop_notifications_channel_name">Nya Workshop-moddar</string>
+    <string name="workshop_notifications_channel_desc">Notiser när nya Workshop-moddar laddas upp till dina följda spel</string>
 </resources>

@@ -1,8 +1,12 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -67,7 +71,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,6 +97,7 @@ import com.example.model.WorkshopModItem
 import com.example.model.WorkshopModsUiState
 import com.example.model.WorkshopSectionTab
 import com.example.model.WorkshopSortOrder
+import com.example.notifications.WorkshopNotificationHelper
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
 import com.example.ui.theme.SteamAmber
@@ -107,6 +114,11 @@ import com.example.ui.theme.SteamTextSecondary
 import com.example.util.SteamDeepLinkHelper
 import com.example.viewmodel.WorkshopScreenUiState
 import java.util.Locale
+
+private enum class PendingNotificationAction {
+    ENABLE_SWITCH,
+    TEST_NOTIFICATION
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,11 +152,93 @@ fun WorkshopScreen(
     onDismissSteamWebViewLogin: () -> Unit = {},
     onSteamWebViewAuthenticated: (String, String) -> Unit = { _, _ -> },
     onLogoutSteamSession: () -> Unit = {},
-    onWorkshopVisited: () -> Unit = {}
+    onWorkshopVisited: () -> Unit = {},
+    onSetNewModNotificationsEnabled: (Boolean) -> Unit = {},
+    onShowNotificationFeedback: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
+    var hasNotificationPermission by remember {
+        mutableStateOf(WorkshopNotificationHelper.hasNotificationPermission(context))
+    }
+    var hasAutoPromptedNotificationPermission by rememberSaveable { mutableStateOf(false) }
+    var pendingNotificationAction by remember { mutableStateOf<PendingNotificationAction?>(null) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasNotificationPermission = granted
+        val action = pendingNotificationAction
+        pendingNotificationAction = null
+        if (granted) {
+            onSetNewModNotificationsEnabled(true)
+            WorkshopNotificationHelper.schedulePeriodicCheck(context)
+            when (action) {
+                PendingNotificationAction.TEST_NOTIFICATION -> {
+                    WorkshopNotificationHelper.postTestNotification(context)
+                    onShowNotificationFeedback("Testnotis skickad!")
+                }
+                PendingNotificationAction.ENABLE_SWITCH -> {
+                    onShowNotificationFeedback("Notiser aktiverade – kontrollerar var 2:a timme")
+                }
+                null -> Unit
+            }
+        } else if (action != null) {
+            onShowNotificationFeedback("Notisbehörighet nekad. Aktivera notiser i telefonens inställningar.")
+        }
+    }
+
     LaunchedEffect(Unit) {
         onWorkshopVisited()
+        hasNotificationPermission = WorkshopNotificationHelper.hasNotificationPermission(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !hasNotificationPermission &&
+            uiState.newModNotificationsEnabled &&
+            !hasAutoPromptedNotificationPermission
+        ) {
+            hasAutoPromptedNotificationPermission = true
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    LaunchedEffect(uiState.newModNotificationsEnabled, hasNotificationPermission) {
+        if (uiState.newModNotificationsEnabled && hasNotificationPermission) {
+            WorkshopNotificationHelper.schedulePeriodicCheck(context)
+        } else if (!uiState.newModNotificationsEnabled) {
+            WorkshopNotificationHelper.cancelPeriodicCheck(context)
+        }
+    }
+
+    val handleToggleNewModNotifications: (Boolean) -> Unit = { enabled ->
+        if (!enabled) {
+            onSetNewModNotificationsEnabled(false)
+            WorkshopNotificationHelper.cancelPeriodicCheck(context)
+            onShowNotificationFeedback("Bakgrundsnotiser pausade")
+        } else {
+            val permGranted = WorkshopNotificationHelper.hasNotificationPermission(context)
+            hasNotificationPermission = permGranted
+            if (permGranted) {
+                onSetNewModNotificationsEnabled(true)
+                WorkshopNotificationHelper.schedulePeriodicCheck(context)
+                onShowNotificationFeedback("Notiser aktiverade – kontrollerar var 2:a timme")
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pendingNotificationAction = PendingNotificationAction.ENABLE_SWITCH
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    val handleTestNotification: () -> Unit = {
+        val permGranted = WorkshopNotificationHelper.hasNotificationPermission(context)
+        hasNotificationPermission = permGranted
+        if (permGranted) {
+            val sent = WorkshopNotificationHelper.postTestNotification(context)
+            onShowNotificationFeedback(
+                if (sent) "Testnotis skickad!" else "Kunde inte skicka notis."
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pendingNotificationAction = PendingNotificationAction.TEST_NOTIFICATION
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     val openUrl: (String) -> Unit = { url ->
@@ -185,6 +279,10 @@ fun WorkshopScreen(
 
                 WorkshopSectionTab.FOLLOWED -> WorkshopFollowedView(
                     uiState = uiState,
+                    isNewModNotificationsActive = uiState.newModNotificationsEnabled && hasNotificationPermission,
+                    hasNotificationPermission = hasNotificationPermission,
+                    onToggleNewModNotifications = handleToggleNewModNotifications,
+                    onTestNotification = handleTestNotification,
                     onOpenGameWorkshop = onOpenGameWorkshop,
                     onToggleFollowGame = onToggleFollowGame,
                     onRefreshFollowedFeed = onRefreshFollowedFeed,
