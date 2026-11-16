@@ -238,6 +238,48 @@ class SteamWorkshopRepository(
         }
     }
 
+    private fun executeAuthenticatedSteamGet(
+        url: String,
+        cookieHeader: String,
+        userAgent: String?
+    ): HttpFetchOutcome {
+        val effectiveUserAgent = userAgent?.takeIf { it.isNotBlank() } ?: DESKTOP_USER_AGENT
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", effectiveUserAgent)
+            .header("Accept", "text/html,application/xhtml+xml")
+            .header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8")
+            .header("Cookie", cookieHeader)
+            .header("Referer", "https://steamcommunity.com/")
+            .get()
+            .build()
+
+        return try {
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                val finalUrl = response.request.url.toString()
+                if (response.code == 401 || response.code == 403) {
+                    throw SteamSessionExpiredException(
+                        "Steam-sessionen har gått ut (HTTP 403). Tryck på Logga ut från Steam-synk och logga in igen."
+                    )
+                }
+                if (!response.isSuccessful) {
+                    throw IOException("Steam Workshop svarade med HTTP ${response.code}")
+                }
+                HttpFetchOutcome(
+                    requestedUrl = url,
+                    finalUrl = finalUrl,
+                    statusCode = response.code,
+                    body = body
+                )
+            }
+        } catch (e: SteamSessionExpiredException) {
+            throw e
+        } catch (e: IOException) {
+            throw IOException("Kunde inte ladda Steam Workshop: ${e.localizedMessage ?: "nätverksfel"}", e)
+        }
+    }
+
     private fun buildDiagnosticSummary(
         appId: Int,
         outcome: HttpFetchOutcome?,
@@ -436,7 +478,8 @@ class SteamWorkshopRepository(
 
     suspend fun fetchSubscribedWorkshopMods(
         rawProfileInput: String,
-        sessionCookie: String? = null
+        sessionCookie: String? = null,
+        sessionUserAgent: String? = null
     ): SteamSubscribedSyncResult = withContext(Dispatchers.IO) {
         val sessionSteamId = sessionCookie?.let { extractSteamId64FromCookie(it) }
         val useAuthenticatedSubscriptions = !sessionCookie.isNullOrBlank() && sessionSteamId != null
@@ -471,7 +514,11 @@ class SteamWorkshopRepository(
             } else {
                 buildFavoriteWorkshopUrl(steamId64, page)
             }
-            val outcome = executeSteamGet(url, effectiveCookie)
+            val outcome = if (useAuthenticatedSubscriptions) {
+                executeAuthenticatedSteamGet(url, effectiveCookie, sessionUserAgent)
+            } else {
+                executeSteamGet(url, effectiveCookie)
+            }
             if (page == 1) {
                 firstUrl = outcome.requestedUrl
                 firstStatusCode = outcome.statusCode
@@ -479,9 +526,9 @@ class SteamWorkshopRepository(
 
             if (useAuthenticatedSubscriptions) {
                 val finalPath = runCatching { java.net.URI(outcome.finalUrl).path }.getOrNull().orEmpty()
-                if (finalPath.startsWith("/login", ignoreCase = true)) {
+                if (finalPath.startsWith("/login", ignoreCase = true) || outcome.statusCode == 401 || outcome.statusCode == 403) {
                     throw SteamSessionExpiredException(
-                        "Din Steam-inloggning har gått ut. Logga in med Steam igen för att synka prenumerationer."
+                        "Steam-sessionen har gått ut (HTTP 403). Tryck på Logga ut från Steam-synk och logga in igen."
                     )
                 }
             }

@@ -71,13 +71,13 @@ fun clearSteamWebViewCookies() {
 @Composable
 internal fun SteamWebViewLoginDialog(
     onDismiss: () -> Unit,
-    onSteamLoginCaptured: (steamId64: String, cookieString: String) -> Unit
+    onSteamLoginCaptured: (steamId64: String, cookieString: String, userAgentString: String) -> Unit
 ) {
     var loadProgress by remember { mutableIntStateOf(0) }
     var isPageLoading by remember { mutableStateOf(true) }
     var sessionCaptured by remember { mutableStateOf(false) }
 
-    fun inspectAndCaptureCookies(url: String?) {
+    fun inspectAndCaptureCookies(url: String?, webView: WebView?) {
         if (sessionCaptured) return
         val cm = runCatching { CookieManager.getInstance() }.getOrNull() ?: return
         val communityCookie = runCatching { cm.getCookie(STEAM_COMMUNITY_ORIGIN) }.getOrNull().orEmpty()
@@ -88,15 +88,22 @@ internal fun SteamWebViewLoginDialog(
         }
 
         val candidateCookie = when {
+            communityCookie.contains("steamLoginSecure=", ignoreCase = true) && communityCookie.contains("sessionid=", ignoreCase = true) -> communityCookie
+            urlCookie.contains("steamLoginSecure=", ignoreCase = true) && urlCookie.contains("sessionid=", ignoreCase = true) -> urlCookie
             SteamWorkshopRepository.extractSteamId64FromCookie(communityCookie) != null -> communityCookie
             SteamWorkshopRepository.extractSteamId64FromCookie(urlCookie) != null -> urlCookie
             else -> null
         } ?: return
 
+        if (!candidateCookie.contains("steamLoginSecure=", ignoreCase = true) || !candidateCookie.contains("sessionid=", ignoreCase = true)) {
+            return
+        }
+
         val steamId64 = SteamWorkshopRepository.extractSteamId64FromCookie(candidateCookie) ?: return
         sessionCaptured = true
         runCatching { cm.flush() }
-        onSteamLoginCaptured(steamId64, candidateCookie)
+        val userAgent = webView?.settings?.userAgentString.orEmpty()
+        onSteamLoginCaptured(steamId64, candidateCookie, userAgent)
     }
 
     Dialog(
@@ -201,26 +208,26 @@ internal fun SteamWebViewLoginDialog(
                                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                         super.onPageStarted(view, url, favicon)
                                         isPageLoading = true
-                                        inspectAndCaptureCookies(url)
+                                        inspectAndCaptureCookies(url, view)
                                     }
 
                                     override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                                         super.doUpdateVisitedHistory(view, url, isReload)
-                                        inspectAndCaptureCookies(url)
+                                        inspectAndCaptureCookies(url, view)
                                     }
 
                                     override fun shouldOverrideUrlLoading(
                                         view: WebView?,
                                         request: WebResourceRequest?
                                     ): Boolean {
-                                        inspectAndCaptureCookies(request?.url?.toString())
+                                        inspectAndCaptureCookies(request?.url?.toString(), view)
                                         return false
                                     }
 
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         super.onPageFinished(view, url)
                                         isPageLoading = false
-                                        inspectAndCaptureCookies(url)
+                                        inspectAndCaptureCookies(url, view)
                                     }
                                 }
 

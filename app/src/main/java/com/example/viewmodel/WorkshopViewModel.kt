@@ -140,6 +140,7 @@ class WorkshopViewModel(
     private val removedModIds = mutableSetOf<String>()
     private var hasPendingLocalSyncProfile = false
     private var steamSessionCookie: String = ""
+    private var steamSessionUserAgent: String = ""
     private var hasRecordedSessionVisit = false
     private val recordedFollowedGameVisits = mutableSetOf<Int>()
 
@@ -166,6 +167,7 @@ class WorkshopViewModel(
         val prevWorkshopVisit = store.getWorkshopLastVisitEpochSec(storeKey)
         val followedPrevMap = store.loadGameLastVisitMap(storeKey, snapshot.followedGames.map { it.appId })
         steamSessionCookie = snapshot.steamSessionCookie
+        steamSessionUserAgent = snapshot.steamSessionUserAgent
         val sessionId64 = snapshot.steamSessionSteamId64
             .ifBlank { SteamWorkshopRepository.extractSteamId64FromCookie(snapshot.steamSessionCookie).orEmpty() }
         val isSessionActive = snapshot.steamSessionCookie.isNotBlank() && sessionId64.isNotBlank()
@@ -835,14 +837,16 @@ class WorkshopViewModel(
         _uiState.update { it.copy(showSteamWebViewLoginDialog = false) }
     }
 
-    fun onSteamWebViewAuthenticated(steamId64: String, cookieString: String) {
+    fun onSteamWebViewAuthenticated(steamId64: String, cookieString: String, userAgentString: String = "") {
         val cleanCookie = cookieString.trim()
         val cleanSteamId = steamId64.trim()
+        val cleanUserAgent = userAgentString.trim()
         if (cleanCookie.isBlank() || cleanSteamId.isBlank()) return
 
         // Strictly local device storage — NEVER uploaded to Firebase Firestore.
         steamSessionCookie = cleanCookie
-        localStore?.saveSteamSession(storeUserKey(), cleanSteamId, cleanCookie)
+        steamSessionUserAgent = cleanUserAgent
+        localStore?.saveSteamSession(storeUserKey(), cleanSteamId, cleanCookie, cleanUserAgent)
 
         _uiState.update { current ->
             current.copy(
@@ -858,6 +862,7 @@ class WorkshopViewModel(
 
     fun logoutSteamSession() {
         steamSessionCookie = ""
+        steamSessionUserAgent = ""
         localStore?.clearSteamSession(storeUserKey())
         _uiState.update { current ->
             current.copy(
@@ -875,6 +880,7 @@ class WorkshopViewModel(
 
     fun syncSteamSubscriptions() {
         val sessionCookieSnapshot = steamSessionCookie.takeIf { it.isNotBlank() }
+        val sessionUserAgentSnapshot = steamSessionUserAgent.takeIf { it.isNotBlank() }
         val rawInput = _uiState.value.steamProfileInput.trim()
             .ifBlank { _uiState.value.steamSessionSteamId64.trim() }
         if (rawInput.isBlank() && sessionCookieSnapshot == null) {
@@ -892,7 +898,8 @@ class WorkshopViewModel(
                 // Step 1: Fetch and parse directly from steamcommunity.com FIRST, completely decoupled from Firestore.
                 val syncResult = repository.fetchSubscribedWorkshopMods(
                     rawProfileInput = rawInput,
-                    sessionCookie = sessionCookieSnapshot
+                    sessionCookie = sessionCookieSnapshot,
+                    sessionUserAgent = sessionUserAgentSnapshot
                 )
                 val nowTs = Timestamp.now()
                 val newProfile = SteamWorkshopSyncProfile(

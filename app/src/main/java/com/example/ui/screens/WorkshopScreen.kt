@@ -152,7 +152,7 @@ fun WorkshopScreen(
     onSubmitSteamSync: () -> Unit = {},
     onOpenSteamWebViewLogin: () -> Unit = {},
     onDismissSteamWebViewLogin: () -> Unit = {},
-    onSteamWebViewAuthenticated: (String, String) -> Unit = { _, _ -> },
+    onSteamWebViewAuthenticated: (String, String, String) -> Unit = { _, _, _ -> },
     onLogoutSteamSession: () -> Unit = {},
     onWorkshopVisited: () -> Unit = {},
     onSetNewModNotificationsEnabled: (Boolean) -> Unit = {},

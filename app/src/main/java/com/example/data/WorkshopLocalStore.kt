@@ -25,7 +25,8 @@ data class WorkshopLocalSnapshot(
     val followedMods: List<FollowedWorkshopMod> = emptyList(),
     val syncProfile: SteamWorkshopSyncProfile? = null,
     val steamSessionCookie: String = "",
-    val steamSessionSteamId64: String = ""
+    val steamSessionSteamId64: String = "",
+    val steamSessionUserAgent: String = ""
 )
 
 class WorkshopLocalStore(
@@ -42,12 +43,14 @@ class WorkshopLocalStore(
         val syncProfile = parseSyncProfile(prefs.getString("${prefix}sync_profile", null).orEmpty(), userId)
         val sessionCookie = prefs.getString("${prefix}steam_session_cookie", null).orEmpty()
         val sessionSteamId64 = prefs.getString("${prefix}steam_session_steamid64", null).orEmpty()
+        val sessionUserAgent = prefs.getString("${prefix}steam_session_user_agent", null).orEmpty()
         return WorkshopLocalSnapshot(
             followedGames = games,
             followedMods = mods,
             syncProfile = syncProfile,
             steamSessionCookie = sessionCookie,
-            steamSessionSteamId64 = sessionSteamId64
+            steamSessionSteamId64 = sessionSteamId64,
+            steamSessionUserAgent = sessionUserAgent
         )
     }
 
@@ -105,11 +108,12 @@ class WorkshopLocalStore(
         prefs.edit().putString(key, obj.toString()).apply()
     }
 
-    fun saveSteamSession(userId: String, steamId64: String, cookieHeader: String) {
+    fun saveSteamSession(userId: String, steamId64: String, cookieHeader: String, userAgent: String = "") {
         val prefix = keyPrefix(userId)
         prefs.edit()
             .putString("${prefix}steam_session_cookie", cookieHeader.trim())
             .putString("${prefix}steam_session_steamid64", steamId64.trim())
+            .putString("${prefix}steam_session_user_agent", userAgent.trim())
             .apply()
     }
 
@@ -118,6 +122,7 @@ class WorkshopLocalStore(
         prefs.edit()
             .remove("${prefix}steam_session_cookie")
             .remove("${prefix}steam_session_steamid64")
+            .remove("${prefix}steam_session_user_agent")
             .apply()
     }
 
@@ -143,7 +148,7 @@ class WorkshopLocalStore(
             saveSyncProfile(newUserId, guestSnapshot.syncProfile)
         }
         if (userSnapshot.steamSessionCookie.isEmpty() && guestSnapshot.steamSessionCookie.isNotEmpty()) {
-            saveSteamSession(newUserId, guestSnapshot.steamSessionSteamId64, guestSnapshot.steamSessionCookie)
+            saveSteamSession(newUserId, guestSnapshot.steamSessionSteamId64, guestSnapshot.steamSessionCookie, guestSnapshot.steamSessionUserAgent)
         }
         if (getWorkshopLastVisitEpochSec(newUserId) == 0L) {
             val guestVisit = getWorkshopLastVisitEpochSec("guest")
