@@ -77,6 +77,7 @@ class PulseDealsUiTest {
     @Test
     fun topBar_signedInModeShowsAccountAvatarMenuAndSignOut() {
         var signedOut = false
+        var checkedUpdate = false
 
         composeTestRule.setContent {
             SteamPulseTheme {
@@ -89,6 +90,7 @@ class PulseDealsUiTest {
                     onSelectCurrency = {},
                     onNavigateToLogin = {},
                     onOpenReleases = {},
+                    onCheckForUpdate = { checkedUpdate = true },
                     onSignOut = { signedOut = true }
                 )
             }
@@ -99,6 +101,10 @@ class PulseDealsUiTest {
         composeTestRule.onNodeWithTag("account_menu_button").assertIsDisplayed().performClick()
 
         composeTestRule.onNodeWithText("Alex Gamer").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("check_update_menu_item").assertIsDisplayed().performClick()
+        assertTrue(checkedUpdate)
+
+        composeTestRule.onNodeWithTag("account_menu_button").performClick()
         composeTestRule.onNodeWithTag("sign_out_button").assertIsDisplayed().performClick()
         assertTrue(signedOut)
     }

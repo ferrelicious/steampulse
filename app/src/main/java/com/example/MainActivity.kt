@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -101,6 +102,8 @@ import com.example.firebase.configureAppCheck
 import com.example.model.CurrencyMode
 import com.example.model.WorkshopSectionTab
 import com.example.notifications.WorkshopNotificationHelper
+import com.example.ui.components.AppUpdateDialog
+import com.example.ui.components.rememberAppUpdateCoordinator
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ImageStudioScreen
@@ -128,6 +131,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 
 enum class AppTab(
@@ -182,6 +186,14 @@ fun AppNavigation(
     val context = LocalContext.current
     val localStore = remember { WorkshopLocalStore(context) }
     var isGuestMode by remember { mutableStateOf(localStore.isGuestMode()) }
+    val updateMessagesFlow = remember { MutableSharedFlow<String>(extraBufferCapacity = 8) }
+    val updateCoordinator = rememberAppUpdateCoordinator(
+        onStatusMessage = { msg -> updateMessagesFlow.tryEmit(msg) }
+    )
+
+    LaunchedEffect(Unit) {
+        updateCoordinator.checkForUpdates(manual = false)
+    }
 
     val currentUser by auth.authStateFlow()
         .collectAsStateWithLifecycle(initialValue = auth.currentUser)
@@ -215,12 +227,26 @@ fun AppNavigation(
                 userEmail = user?.email,
                 launchIntent = launchIntent,
                 onConsumeLaunchIntent = onConsumeLaunchIntent,
+                hasAppUpdateAvailable = updateCoordinator.hasAvailableUpdate,
+                updateMessagesFlow = updateMessagesFlow,
+                onCheckForUpdate = { updateCoordinator.checkForUpdates(manual = true) },
                 onNavigateToLogin = {
                     localStore.setGuestMode(false)
                     isGuestMode = false
                 }
             )
         }
+    }
+
+    val pendingUpdateRelease = updateCoordinator.pendingRelease
+    if (pendingUpdateRelease != null) {
+        AppUpdateDialog(
+            release = pendingUpdateRelease,
+            isDownloading = updateCoordinator.activeDownloadId != null,
+            awaitingPermission = updateCoordinator.awaitingInstallPermission,
+            onUpdateNow = updateCoordinator::startUpdateNow,
+            onLater = updateCoordinator::dismissForLater
+        )
     }
 }
 
@@ -233,6 +259,9 @@ private fun AuthenticatedAppShell(
     userEmail: String? = null,
     launchIntent: Intent? = null,
     onConsumeLaunchIntent: () -> Unit = {},
+    hasAppUpdateAvailable: Boolean = false,
+    updateMessagesFlow: MutableSharedFlow<String>? = null,
+    onCheckForUpdate: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -310,7 +339,7 @@ private fun AuthenticatedAppShell(
         pulseViewModel.updateFollowedAppIds(workshopState.followedGameIds)
     }
 
-    LaunchedEffect(pulseViewModel, workshopViewModel) {
+    LaunchedEffect(pulseViewModel, workshopViewModel, updateMessagesFlow) {
         launch {
             pulseViewModel.toastEvents.collect { msg ->
                 snackbarHostState.showSnackbar(msg)
@@ -319,6 +348,13 @@ private fun AuthenticatedAppShell(
         launch {
             workshopViewModel.toastEvents.collect { msg ->
                 snackbarHostState.showSnackbar(msg)
+            }
+        }
+        if (updateMessagesFlow != null) {
+            launch {
+                updateMessagesFlow.collect { msg ->
+                    snackbarHostState.showSnackbar(msg)
+                }
             }
         }
     }
@@ -343,10 +379,11 @@ private fun AuthenticatedAppShell(
                 isGuest = isGuest,
                 userDisplayName = userDisplayName,
                 userEmail = userEmail,
-                hasUpdateAvailable = releaseState.hasUpdateAvailable,
+                hasUpdateAvailable = releaseState.hasUpdateAvailable || hasAppUpdateAvailable,
                 onSelectCurrency = pulseViewModel::setCurrency,
                 onNavigateToLogin = onNavigateToLogin,
                 onOpenReleases = { showReleasePage = true },
+                onCheckForUpdate = onCheckForUpdate,
                 onSignOut = { signOut(credentialManager, scope) }
             )
         },
@@ -593,6 +630,7 @@ internal fun SteamPulseTopBar(
     onSelectCurrency: (CurrencyMode) -> Unit,
     onNavigateToLogin: () -> Unit,
     onOpenReleases: () -> Unit,
+    onCheckForUpdate: () -> Unit = {},
     onSignOut: () -> Unit
 ) {
     var accountMenuExpanded by remember { mutableStateOf(false) }
@@ -759,6 +797,26 @@ internal fun SteamPulseTopBar(
                             onClick = {}
                         )
                         HorizontalDivider(color = SteamBorder)
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Refresh,
+                                    contentDescription = null,
+                                    tint = SteamNeon
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = "Sök uppdatering",
+                                    color = SteamTextPrimary
+                                )
+                            },
+                            onClick = {
+                                accountMenuExpanded = false
+                                onCheckForUpdate()
+                            },
+                            modifier = Modifier.testTag("check_update_menu_item")
+                        )
                         DropdownMenuItem(
                             leadingIcon = {
                                 Icon(
