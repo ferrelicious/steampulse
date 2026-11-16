@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.example.model.FollowedWorkshopGame
 import com.example.model.FollowedWorkshopMod
 import com.example.model.SteamWorkshopSyncProfile
+import com.example.model.WatchlistItem
 import com.example.model.WorkshopFollowSource
 import com.google.firebase.Timestamp
 import org.json.JSONArray
@@ -161,6 +162,11 @@ class WorkshopLocalStore(
             if (!guestSeen.isNullOrBlank()) {
                 prefs.edit().putString(seenMapKey, guestSeen).apply()
             }
+        }
+        val userWatchlist = loadWatchlist(newUserId)
+        val guestWatchlist = loadWatchlist("guest")
+        if (userWatchlist.isEmpty() && guestWatchlist.isNotEmpty()) {
+            saveWatchlist(newUserId, guestWatchlist.map { it.copy(userId = newUserId) })
         }
     }
 
@@ -425,6 +431,64 @@ class WorkshopLocalStore(
                 updatedAt = ts
             )
         }.getOrNull()
+    }
+
+    fun loadWatchlist(userId: String): List<WatchlistItem> {
+        val raw = prefs.getString("${keyPrefix(userId)}watchlist_items", null).orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id", "").trim()
+                    if (id.isBlank()) continue
+                    val updatedSec = obj.optLong("updatedSec", 0L).takeIf { it > 0L }
+                    val ts = updatedSec?.let { Timestamp(it, 0) }
+                    add(
+                        WatchlistItem(
+                            id = id,
+                            userId = userId,
+                            gameTitle = obj.optString("gameTitle", ""),
+                            targetPriceEur = obj.optDouble("targetPriceEur", 0.0),
+                            preferredCurrency = obj.optString("preferredCurrency", "SEK"),
+                            createdAt = ts,
+                            updatedAt = ts
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveWatchlist(userId: String, items: List<WatchlistItem>) {
+        val arr = JSONArray()
+        items.distinctBy { it.id }.forEach { item ->
+            if (item.id.isBlank()) return@forEach
+            arr.put(
+                JSONObject().apply {
+                    put("id", item.id)
+                    put("gameTitle", item.gameTitle)
+                    put("targetPriceEur", item.targetPriceEur)
+                    put("preferredCurrency", item.preferredCurrency)
+                    put("updatedSec", item.updatedAt?.seconds ?: (System.currentTimeMillis() / 1000L))
+                }
+            )
+        }
+        prefs.edit().putString("${keyPrefix(userId)}watchlist_items", arr.toString()).apply()
+    }
+
+    fun upsertWatchlistItemLocal(userId: String, item: WatchlistItem): List<WatchlistItem> {
+        val current = loadWatchlist(userId).filterNot { it.id == item.id }
+        val updated = listOf(item.copy(userId = userId)) + current
+        saveWatchlist(userId, updated)
+        return updated
+    }
+
+    fun removeWatchlistItemLocal(userId: String, gameId: String): List<WatchlistItem> {
+        val updated = loadWatchlist(userId).filterNot { it.id == gameId }
+        saveWatchlist(userId, updated)
+        return updated
     }
 
     private fun keyPrefix(userId: String): String {

@@ -1122,6 +1122,23 @@ class WorkshopViewModel(
         openGameWorkshop(game)
     }
 
+    fun focusGameFromPulse(appId: Int, title: String) {
+        _uiState.update { it.copy(activeSectionTab = WorkshopSectionTab.DISCOVER) }
+        val existing = ((_uiState.value.gamesState as? WorkshopGamesUiState.Success)?.games)
+            ?.firstOrNull { it.appId == appId }
+        val isSupported = appId > 0 && (
+            SteamWorkshopRepository.KNOWN_WORKSHOP_APP_IDS.contains(appId) ||
+                existing?.isKnownWorkshopPowerhouse == true
+            )
+        if (isSupported) {
+            openCustomAppWorkshop(appId = appId, displayName = title)
+        } else {
+            closeGameWorkshop()
+            updateGameSearchQuery(title)
+            submitGameSearch()
+        }
+    }
+
     fun closeGameWorkshop() {
         loadModsJob?.cancel()
         loadDetailJob?.cancel()

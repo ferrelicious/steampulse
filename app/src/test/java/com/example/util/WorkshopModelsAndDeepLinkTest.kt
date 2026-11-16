@@ -194,4 +194,46 @@ class WorkshopModelsAndDeepLinkTest {
             startedIntents[1].dataString
         )
     }
+
+    @Test
+    fun steamDeepLinkHelper_buildsStoreUriAndFallsBackToBrowserOnActivityNotFound() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        assertEquals(
+            "steam://store/730",
+            SteamDeepLinkHelper.buildSteamStoreAppUri(730).toString()
+        )
+        assertEquals(
+            "https://store.steampowered.com/app/730/",
+            SteamDeepLinkHelper.buildStoreWebFallbackUri(730).toString()
+        )
+
+        assertFalse(SteamDeepLinkHelper.openStoreGameInSteam(app, 0))
+        assertFalse(SteamDeepLinkHelper.openStoreGameInSteam(app, -5))
+
+        val pkgInfo = PackageInfo().apply {
+            packageName = SteamDeepLinkHelper.STEAM_PACKAGE_NAME
+        }
+        shadowOf(app.packageManager).installPackage(pkgInfo)
+        val storeIntent = SteamDeepLinkHelper.buildSteamStoreDeepLinkIntent(app, 730)
+        assertEquals(SteamDeepLinkHelper.STEAM_PACKAGE_NAME, storeIntent.`package`)
+
+        val startedIntents = mutableListOf<Intent>()
+        val recordingContext = object : ContextWrapper(app) {
+            override fun startActivity(intent: Intent) {
+                startedIntents.add(intent)
+                if (intent.data?.scheme == "steam") {
+                    throw ActivityNotFoundException("Steam app cannot handle store intent")
+                }
+            }
+        }
+
+        val opened = SteamDeepLinkHelper.openStoreGameInSteam(
+            context = recordingContext,
+            appId = 730
+        )
+        assertTrue(opened)
+        assertEquals(2, startedIntents.size)
+        assertEquals("steam://store/730", startedIntents[0].dataString)
+        assertEquals("https://store.steampowered.com/app/730/", startedIntents[1].dataString)
+    }
 }

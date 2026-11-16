@@ -5,17 +5,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import com.example.SteamPulseTopBar
 import com.example.data.SteamGamesCatalog
 import com.example.model.CurrencyMode
+import com.example.model.GameCategory
+import com.example.model.SteamGame
+import com.example.model.WatchlistItem
 import com.example.ui.screens.PulseDealsScreen
+import com.example.ui.screens.WatchlistScreen
 import com.example.ui.theme.SteamPulseTheme
 import com.example.viewmodel.SteamPulseUiState
+import com.example.viewmodel.WatchlistUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -142,5 +150,120 @@ class PulseDealsUiTest {
             .assertIsDisplayed()
         composeTestRule.onNodeWithContentDescription(firstGame.title, useUnmergedTree = true)
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun pulseDealsScreen_followedChipAndModalSheetQuickActionsWork() {
+        val paidGame = SteamGamesCatalog.initialGames.first {
+            !it.isFreeToPlay && it.steamPriceEur > 0.0 && SteamGamesCatalog.getDiscountPercent(it) > 0
+        }
+        var selectedCategory by mutableStateOf(GameCategory.FOLLOWED)
+        var selectedGameId by mutableStateOf<String?>(null)
+        var workshopOpenedFor: SteamGame? = null
+        var savedAlertGame: SteamGame? = null
+        var savedAlertTarget: Double? = null
+
+        composeTestRule.setContent {
+            SteamPulseTheme {
+                PulseDealsScreen(
+                    uiState = SteamPulseUiState(
+                        games = if (selectedCategory == GameCategory.FOLLOWED) emptyList() else listOf(paidGame),
+                        selectedCategory = selectedCategory,
+                        selectedGameId = selectedGameId
+                    ),
+                    watchlistItems = emptyList(),
+                    onSearchChange = {},
+                    onCategorySelect = { selectedCategory = it },
+                    onSortSelect = {},
+                    onResetFilters = { selectedCategory = GameCategory.ALL },
+                    onOpenGameDetail = { selectedGameId = it },
+                    onCloseGameDetail = { selectedGameId = null },
+                    onSelectEdition = {},
+                    onToggleWatchlist = { _, _ -> },
+                    onSavePriceAlert = { game, target ->
+                        savedAlertGame = game
+                        savedAlertTarget = target
+                    },
+                    onAskAiAboutGame = {},
+                    onOpenWorkshopMods = { workshopOpenedFor = it }
+                )
+            }
+        }
+
+        // "Mina följda" filter chip and empty state
+        composeTestRule.onNodeWithTag("category_chip_followed").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Mina följda").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Inga följda eller bevakade spel ännu")
+            .performScrollTo()
+            .assertIsDisplayed()
+
+        // Open detail modal sheet on a paid discounted game
+        composeTestRule.runOnUiThread {
+            selectedCategory = GameCategory.ALL
+            selectedGameId = paidGame.id
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(600L)
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onAllNodesWithText("Spelare Nu").onLast().assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("24h Peak").onLast().assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("All-Time").onLast().assertIsDisplayed()
+        composeTestRule.onNodeWithText("PRISSAMMANFATTNING").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("target_price_slider").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("target_price_input").performScrollTo().performTextReplacement("120")
+        composeTestRule.onNodeWithTag("save_price_alert_button").performScrollTo().performClick()
+        assertEquals(paidGame.id, savedAlertGame?.id)
+        assertEquals(120.0, savedAlertTarget ?: -1.0, 0.001)
+
+        composeTestRule.onNodeWithTag("open_in_steam_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("open_workshop_mods_button").performScrollTo().performClick()
+        assertEquals(paidGame.id, workshopOpenedFor?.id)
+    }
+
+    @Test
+    fun watchlistScreen_displaysTargetReachedBadgeDiscountAndSavesInlineTargetPrice() {
+        val discountedGame = SteamGamesCatalog.initialGames.first {
+            !it.isFreeToPlay && it.steamPriceEur > 0.0 && SteamGamesCatalog.getDiscountPercent(it) > 0
+        }
+        val (_, bestPriceEur) = SteamGamesCatalog.getBestOffer(discountedGame)
+        val watchItem = WatchlistItem(
+            id = discountedGame.id,
+            userId = "guest",
+            gameTitle = discountedGame.title,
+            targetPriceEur = bestPriceEur + 2.0,
+            preferredCurrency = "SEK"
+        )
+        var updatedGameId: String? = null
+        var updatedTargetValue: Double? = null
+
+        composeTestRule.setContent {
+            SteamPulseTheme {
+                WatchlistScreen(
+                    watchlistState = WatchlistUiState.Success(listOf(watchItem)),
+                    games = SteamGamesCatalog.initialGames,
+                    currency = CurrencyMode.SEK,
+                    onOpenGame = {},
+                    onRemoveItem = {},
+                    onUpdateTargetPrice = { game, target ->
+                        updatedGameId = game.id
+                        updatedTargetValue = target
+                    }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("watchlist_item_${discountedGame.id}").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("target_reached_badge_${discountedGame.id}").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Målpris uppnått!").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("watchlist_discount_badge_${discountedGame.id}").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("watchlist_target_input_${discountedGame.id}")
+            .performTextReplacement("185")
+        composeTestRule.onNodeWithTag("watchlist_save_target_${discountedGame.id}")
+            .performClick()
+
+        assertEquals(discountedGame.id, updatedGameId)
+        assertEquals(185.0, updatedTargetValue ?: -1.0, 0.001)
     }
 }

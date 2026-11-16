@@ -246,7 +246,11 @@ private fun AuthenticatedAppShell(
                 val app = checkNotNull(this[APPLICATION_KEY])
                 val databaseId = app.getString(R.string.firestore_database_id)
                 val db = FirebaseFirestore.getInstance(databaseId)
-                SteamPulseViewModel(WatchlistRepository(db), currentUserId)
+                SteamPulseViewModel(
+                    watchlistRepository = WatchlistRepository(db),
+                    currentUserId = currentUserId,
+                    localStore = WorkshopLocalStore(app)
+                )
             }
         }
     )
@@ -300,6 +304,10 @@ private fun AuthenticatedAppShell(
             }
             onConsumeLaunchIntent()
         }
+    }
+
+    LaunchedEffect(workshopState.followedGameIds) {
+        pulseViewModel.updateFollowedAppIds(workshopState.followedGameIds)
     }
 
     LaunchedEffect(pulseViewModel, workshopViewModel) {
@@ -469,6 +477,11 @@ private fun AuthenticatedAppShell(
                                         pendingAiPrompt =
                                             "Analysera dealen för ${game.title}: Steam kostar $steamFormatted, lägsta pris är $bestFormatted hos ${bestOffer.store}. Bör jag slå till nu eller vänta på rea?"
                                         currentTab = AppTab.AI_CHAT
+                                    },
+                                    onOpenWorkshopMods = { game ->
+                                        showReleasePage = false
+                                        workshopViewModel.focusGameFromPulse(game.appId, game.title)
+                                        currentTab = AppTab.WORKSHOP
                                     }
                                 )
 
@@ -518,7 +531,8 @@ private fun AuthenticatedAppShell(
                                         pulseViewModel.openGameDetail(gameId)
                                         currentTab = AppTab.PULSE
                                     },
-                                    onRemoveItem = pulseViewModel::removeWatchlistItem
+                                    onRemoveItem = pulseViewModel::removeWatchlistItem,
+                                    onUpdateTargetPrice = pulseViewModel::savePriceAlert
                                 )
 
                                 AppTab.AI_CHAT -> AiChatScreen(

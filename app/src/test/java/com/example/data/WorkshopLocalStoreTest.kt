@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.model.FollowedWorkshopGame
 import com.example.model.FollowedWorkshopMod
 import com.example.model.SteamWorkshopSyncProfile
+import com.example.model.WatchlistItem
 import com.example.model.WorkshopFollowSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -235,6 +236,55 @@ class WorkshopLocalStoreTest {
         store.migrateGuestDataIfEmpty("u_migrated_interval")
         assertEquals(12L, store.getCheckIntervalHours("u_migrated_interval"))
         assertEquals(1_765_123_456L, store.loadSeenModUpdateMap("u_migrated_interval")["guest_mod_1"])
+    }
+
+    @Test
+    fun watchlist_persistsUpsertsRemovesAndMigratesFromGuest() {
+        assertTrue(store.loadWatchlist("guest").isEmpty())
+
+        val item1 = WatchlistItem(
+            id = "rust",
+            userId = "guest",
+            gameTitle = "Rust",
+            targetPriceEur = 19.99,
+            preferredCurrency = "SEK"
+        )
+        val item2 = WatchlistItem(
+            id = "cyberpunk",
+            userId = "guest",
+            gameTitle = "Cyberpunk 2077",
+            targetPriceEur = 24.50,
+            preferredCurrency = "EUR"
+        )
+
+        store.upsertWatchlistItemLocal("guest", item1)
+        store.upsertWatchlistItemLocal("guest", item2)
+        val loaded = store.loadWatchlist("guest")
+        assertEquals(2, loaded.size)
+        assertEquals("cyberpunk", loaded[0].id)
+        assertEquals("rust", loaded[1].id)
+
+        // Updating existing item replaces without duplicating
+        store.upsertWatchlistItemLocal("guest", item1.copy(targetPriceEur = 14.99))
+        val updated = store.loadWatchlist("guest")
+        assertEquals(2, updated.size)
+        assertEquals(14.99, updated.first { it.id == "rust" }.targetPriceEur, 0.001)
+
+        // Migrate guest watchlist to a new user
+        store.migrateGuestDataIfEmpty("user_wl_1")
+        val migrated = store.loadWatchlist("user_wl_1")
+        assertEquals(2, migrated.size)
+        assertTrue(migrated.all { it.userId == "user_wl_1" })
+
+        // Removing an item only removes from that user's store
+        store.removeWatchlistItemLocal("guest", "cyberpunk")
+        val afterRemove = store.loadWatchlist("guest")
+        assertEquals(1, afterRemove.size)
+        assertEquals("rust", afterRemove.first().id)
+
+        // Existing user watchlist is not overwritten by guest migration
+        store.migrateGuestDataIfEmpty("user_wl_1")
+        assertEquals(2, store.loadWatchlist("user_wl_1").size)
     }
 }
 

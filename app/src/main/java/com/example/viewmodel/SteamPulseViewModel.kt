@@ -8,12 +8,14 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.SteamGamesCatalog
 import com.example.data.WatchlistRepository
+import com.example.data.WorkshopLocalStore
 import com.example.model.CurrencyMode
 import com.example.model.GameCategory
 import com.example.model.GameEdition
 import com.example.model.SortOrder
 import com.example.model.SteamGame
 import com.example.model.WatchlistItem
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -56,7 +58,8 @@ data class SteamPulseUiState(
 
 class SteamPulseViewModel(
     private val watchlistRepository: WatchlistRepository,
-    private val currentUserId: String
+    private val currentUserId: String,
+    private val localStore: WorkshopLocalStore? = null
 ) : ViewModel() {
 
     private val _baseGames = MutableStateFlow(SteamGamesCatalog.initialGames)
@@ -68,27 +71,68 @@ class SteamPulseViewModel(
     private val _globalInGame = MutableStateFlow(11_419_650)
     private val _selectedGameId = MutableStateFlow<String?>(null)
     private val _selectedEdition = MutableStateFlow(GameEdition.STANDARD)
+    private val _followedAppIds = MutableStateFlow<Set<Int>>(emptySet())
+    private val _localWatchlist = MutableStateFlow(localStore?.loadWatchlist(currentUserId).orEmpty())
 
     private val _toastEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val toastEvents: SharedFlow<String> = _toastEvents.asSharedFlow()
 
-    val watchlistState: StateFlow<WatchlistUiState> = watchlistRepository
-        .observeWatchlist(currentUserId)
-        .map<List<WatchlistItem>, WatchlistUiState> { WatchlistUiState.Success(it) }
-        .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            val rootError = firestoreError ?: error
-            Log.w(TAG, "Error observing watchlist", rootError)
-            emit(WatchlistUiState.Error(rootError.message ?: "Kunde inte hämta bevakningslistan."))
-        }
-        .stateIn(
+    val watchlistState: StateFlow<WatchlistUiState> = if (currentUserId == "guest") {
+        _localWatchlist
+            .map<List<WatchlistItem>, WatchlistUiState> { WatchlistUiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = WatchlistUiState.Success(_localWatchlist.value)
+            )
+    } else {
+        combine(
+            watchlistRepository
+                .observeWatchlist(currentUserId)
+                .map<List<WatchlistItem>, WatchlistUiState> { remoteItems ->
+                    localStore?.saveWatchlist(currentUserId, remoteItems)
+                    _localWatchlist.value = remoteItems
+                    WatchlistUiState.Success(remoteItems)
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w(TAG, "Error observing watchlist (using local cache)", rootError)
+                    val cached = _localWatchlist.value
+                    if (cached.isNotEmpty() || firestoreError?.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                        emit(WatchlistUiState.Success(cached))
+                    } else {
+                        emit(WatchlistUiState.Error(rootError.message ?: "Kunde inte hämta bevakningslistan."))
+                    }
+                },
+            _localWatchlist
+        ) { remoteState, localItems ->
+            when (remoteState) {
+                is WatchlistUiState.Success -> {
+                    if (localItems.isNotEmpty() && remoteState.items.isEmpty()) {
+                        WatchlistUiState.Success(localItems)
+                    } else {
+                        remoteState
+                    }
+                }
+                is WatchlistUiState.Loading,
+                is WatchlistUiState.Error -> {
+                    if (localItems.isNotEmpty()) WatchlistUiState.Success(localItems) else remoteState
+                }
+            }
+        }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = WatchlistUiState.Loading
+            initialValue = if (_localWatchlist.value.isNotEmpty()) {
+                WatchlistUiState.Success(_localWatchlist.value)
+            } else {
+                WatchlistUiState.Loading
+            }
         )
+    }
 
     private val filterParamsFlow = combine(
         _searchQuery,
@@ -108,11 +152,20 @@ class SteamPulseViewModel(
         SelectionTelemetry(gameId, edition, online, inGame)
     }
 
+    private val followedAndWatchedFlow = combine(
+        _followedAppIds,
+        watchlistState
+    ) { followedAppIds, wlState ->
+        val watchedIds = (wlState as? WatchlistUiState.Success)?.items?.map { it.id }?.toSet().orEmpty()
+        followedAppIds to watchedIds
+    }
+
     val uiState: StateFlow<SteamPulseUiState> = combine(
         _baseGames,
         filterParamsFlow,
-        selectionFlow
-    ) { games, params, selection ->
+        selectionFlow,
+        followedAndWatchedFlow
+    ) { games, params, selection, (followedAppIds, watchedIds) ->
         val filtered = games.filter { game ->
             val matchesQuery = params.query.isBlank() ||
                 game.title.contains(params.query, ignoreCase = true) ||
@@ -121,6 +174,7 @@ class SteamPulseViewModel(
             if (!matchesQuery) return@filter false
 
             when (params.category) {
+                GameCategory.FOLLOWED -> watchedIds.contains(game.id) || followedAppIds.contains(game.appId)
                 GameCategory.ALL -> true
                 GameCategory.DEALS -> SteamGamesCatalog.getDiscountPercent(game) >= 20
                 else -> game.genres.contains(params.category.label)
@@ -175,6 +229,10 @@ class SteamPulseViewModel(
         }
     }
 
+    fun updateFollowedAppIds(appIds: Set<Int>) {
+        _followedAppIds.value = appIds
+    }
+
     fun setCurrency(currency: CurrencyMode) {
         _currency.value = currency
     }
@@ -213,30 +271,40 @@ class SteamPulseViewModel(
     fun toggleWatchlist(game: SteamGame, isCurrentlyWatched: Boolean) {
         viewModelScope.launch {
             if (isCurrentlyWatched) {
-                val res = watchlistRepository.deleteWatchlistItem(game.id)
-                if (res.isSuccess) {
-                    _toastEvents.emit("${game.title} togs bort från bevakningslistan.")
-                } else {
-                    _toastEvents.emit(
-                        res.exceptionOrNull()?.localizedMessage ?: "Kunde inte ta bort bevakning."
-                    )
+                val updated = localStore?.removeWatchlistItemLocal(currentUserId, game.id)
+                    ?: _localWatchlist.value.filterNot { it.id == game.id }
+                _localWatchlist.value = updated
+                if (currentUserId != "guest") {
+                    runCatching { watchlistRepository.deleteWatchlistItem(game.id) }
                 }
+                _toastEvents.emit("${game.title} togs bort från bevakningslistan.")
             } else {
                 val (_, bestPriceEur) = SteamGamesCatalog.getBestOffer(game)
                 val currency = _currency.value.code
-                val res = watchlistRepository.upsertWatchlistItem(
-                    gameId = game.id,
+                val nowTs = Timestamp.now()
+                val newItem = WatchlistItem(
+                    id = game.id,
+                    userId = currentUserId,
                     gameTitle = game.title,
                     targetPriceEur = bestPriceEur,
-                    preferredCurrency = currency
+                    preferredCurrency = currency,
+                    createdAt = nowTs,
+                    updatedAt = nowTs
                 )
-                if (res.isSuccess) {
-                    _toastEvents.emit("${game.title} lades till i din bevakningslista!")
-                } else {
-                    _toastEvents.emit(
-                        res.exceptionOrNull()?.localizedMessage ?: "Kunde inte spara bevakning."
-                    )
+                val updated = localStore?.upsertWatchlistItemLocal(currentUserId, newItem)
+                    ?: (listOf(newItem) + _localWatchlist.value.filterNot { it.id == game.id })
+                _localWatchlist.value = updated
+                if (currentUserId != "guest") {
+                    runCatching {
+                        watchlistRepository.upsertWatchlistItem(
+                            gameId = game.id,
+                            gameTitle = game.title,
+                            targetPriceEur = bestPriceEur,
+                            preferredCurrency = currency
+                        )
+                    }
                 }
+                _toastEvents.emit("${game.title} lades till i din bevakningslista!")
             }
         }
     }
@@ -246,33 +314,43 @@ class SteamPulseViewModel(
             val currency = _currency.value
             val targetEur = SteamGamesCatalog.toEurFromCurrency(targetPriceInput, currency)
                 .coerceIn(0.0, 1000.0)
-            val res = watchlistRepository.upsertWatchlistItem(
-                gameId = game.id,
+            val nowTs = Timestamp.now()
+            val newItem = WatchlistItem(
+                id = game.id,
+                userId = currentUserId,
                 gameTitle = game.title,
                 targetPriceEur = targetEur,
-                preferredCurrency = currency.code
+                preferredCurrency = currency.code,
+                createdAt = nowTs,
+                updatedAt = nowTs
             )
-            if (res.isSuccess) {
-                val formatted = SteamGamesCatalog.formatPrice(targetEur, currency)
-                _toastEvents.emit("Prisvarning sparad för ${game.title} ($formatted)!")
-            } else {
-                _toastEvents.emit(
-                    res.exceptionOrNull()?.localizedMessage ?: "Kunde inte spara prisvarning."
-                )
+            val updated = localStore?.upsertWatchlistItemLocal(currentUserId, newItem)
+                ?: (listOf(newItem) + _localWatchlist.value.filterNot { it.id == game.id })
+            _localWatchlist.value = updated
+            if (currentUserId != "guest") {
+                runCatching {
+                    watchlistRepository.upsertWatchlistItem(
+                        gameId = game.id,
+                        gameTitle = game.title,
+                        targetPriceEur = targetEur,
+                        preferredCurrency = currency.code
+                    )
+                }
             }
+            val formatted = SteamGamesCatalog.formatPrice(targetEur, currency)
+            _toastEvents.emit("Prisvarning sparad för ${game.title} ($formatted)!")
         }
     }
 
     fun removeWatchlistItem(gameId: String) {
         viewModelScope.launch {
-            val res = watchlistRepository.deleteWatchlistItem(gameId)
-            if (res.isSuccess) {
-                _toastEvents.emit("Spelet togs bort från bevakningslistan.")
-            } else {
-                _toastEvents.emit(
-                    res.exceptionOrNull()?.localizedMessage ?: "Kunde inte ta bort spelet."
-                )
+            val updated = localStore?.removeWatchlistItemLocal(currentUserId, gameId)
+                ?: _localWatchlist.value.filterNot { it.id == gameId }
+            _localWatchlist.value = updated
+            if (currentUserId != "guest") {
+                runCatching { watchlistRepository.deleteWatchlistItem(gameId) }
             }
+            _toastEvents.emit("Spelet togs bort från bevakningslistan.")
         }
     }
 
@@ -295,10 +373,11 @@ class SteamPulseViewModel(
 
         fun provideFactory(
             repository: WatchlistRepository,
-            currentUserId: String
+            currentUserId: String,
+            localStore: WorkshopLocalStore? = null
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                SteamPulseViewModel(repository, currentUserId)
+                SteamPulseViewModel(repository, currentUserId, localStore)
             }
         }
     }

@@ -81,4 +81,51 @@ object SteamDeepLinkHelper {
             false
         }
     }
+
+    fun buildSteamStoreAppUri(appId: Int): Uri =
+        Uri.parse("steam://store/$appId")
+
+    fun buildStoreWebFallbackUri(appId: Int): Uri =
+        Uri.parse("https://store.steampowered.com/app/$appId/")
+
+    fun buildSteamStoreDeepLinkIntent(
+        context: Context,
+        appId: Int
+    ): Intent {
+        return Intent(Intent.ACTION_VIEW, buildSteamStoreAppUri(appId)).apply {
+            if (isSteamAppInstalled(context.packageManager)) {
+                setPackage(STEAM_PACKAGE_NAME)
+            }
+            if (context !is Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+    }
+
+    fun openStoreGameInSteam(
+        context: Context,
+        appId: Int
+    ): Boolean {
+        if (appId <= 0) return false
+        try {
+            context.startActivity(buildSteamStoreDeepLinkIntent(context, appId))
+            return true
+        } catch (_: ActivityNotFoundException) {
+            // Fall through to Steam Store web page
+        } catch (_: Exception) {
+            // Fall through to Steam Store web page
+        }
+
+        return try {
+            val webIntent = Intent(Intent.ACTION_VIEW, buildStoreWebFallbackUri(appId)).apply {
+                if (context !is Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            context.startActivity(webIntent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 }

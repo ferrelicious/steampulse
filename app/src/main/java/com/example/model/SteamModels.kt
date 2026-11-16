@@ -24,6 +24,7 @@ enum class SortOrder(val label: String) {
 }
 
 enum class GameCategory(val label: String) {
+    FOLLOWED("Mina följda"),
     ALL("Alla spel"),
     FPS("FPS/Taktiskt"),
     RPG("RPG/Action"),
