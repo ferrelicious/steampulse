@@ -13,7 +13,9 @@ import org.json.JSONObject
 data class WorkshopLocalSnapshot(
     val followedGames: List<FollowedWorkshopGame> = emptyList(),
     val followedMods: List<FollowedWorkshopMod> = emptyList(),
-    val syncProfile: SteamWorkshopSyncProfile? = null
+    val syncProfile: SteamWorkshopSyncProfile? = null,
+    val steamSessionCookie: String = "",
+    val steamSessionSteamId64: String = ""
 )
 
 class WorkshopLocalStore(
@@ -28,10 +30,14 @@ class WorkshopLocalStore(
         val games = parseFollowedGames(prefs.getString("${prefix}games", null).orEmpty())
         val mods = parseFollowedMods(prefs.getString("${prefix}mods", null).orEmpty())
         val syncProfile = parseSyncProfile(prefs.getString("${prefix}sync_profile", null).orEmpty(), userId)
+        val sessionCookie = prefs.getString("${prefix}steam_session_cookie", null).orEmpty()
+        val sessionSteamId64 = prefs.getString("${prefix}steam_session_steamid64", null).orEmpty()
         return WorkshopLocalSnapshot(
             followedGames = games,
             followedMods = mods,
-            syncProfile = syncProfile
+            syncProfile = syncProfile,
+            steamSessionCookie = sessionCookie,
+            steamSessionSteamId64 = sessionSteamId64
         )
     }
 
@@ -86,6 +92,22 @@ class WorkshopLocalStore(
             put("updatedSec", profile.updatedAt?.seconds ?: (System.currentTimeMillis() / 1000L))
         }
         prefs.edit().putString(key, obj.toString()).apply()
+    }
+
+    fun saveSteamSession(userId: String, steamId64: String, cookieHeader: String) {
+        val prefix = keyPrefix(userId)
+        prefs.edit()
+            .putString("${prefix}steam_session_cookie", cookieHeader.trim())
+            .putString("${prefix}steam_session_steamid64", steamId64.trim())
+            .apply()
+    }
+
+    fun clearSteamSession(userId: String) {
+        val prefix = keyPrefix(userId)
+        prefs.edit()
+            .remove("${prefix}steam_session_cookie")
+            .remove("${prefix}steam_session_steamid64")
+            .apply()
     }
 
     private fun parseFollowedGames(raw: String): List<FollowedWorkshopGame> {

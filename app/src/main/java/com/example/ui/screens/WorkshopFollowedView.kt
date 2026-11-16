@@ -22,15 +22,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -95,7 +98,8 @@ internal fun WorkshopFollowedView(
     onOpenModDetail: (WorkshopModItem) -> Unit,
     onToggleBookmarkMod: (WorkshopModItem, String?) -> Unit,
     onRemoveFollowedMod: (String) -> Unit,
-    onOpenSteamSyncDialog: () -> Unit
+    onOpenSteamSyncDialog: () -> Unit,
+    onLogoutSteamSession: () -> Unit = {}
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -372,12 +376,13 @@ internal fun WorkshopFollowedView(
             }
         }
 
-        // 3. Steam Public Favorites Sync Banner
+        // 3. Steam Public Favorites / Subscriptions Sync Banner
         item(key = "steam_sync_banner") {
             Spacer(modifier = Modifier.height(4.dp))
             SteamSyncStatusCard(
                 uiState = uiState,
-                onOpenSteamSyncDialog = onOpenSteamSyncDialog
+                onOpenSteamSyncDialog = onOpenSteamSyncDialog,
+                onLogoutSteamSession = onLogoutSteamSession
             )
         }
     }
@@ -386,7 +391,8 @@ internal fun WorkshopFollowedView(
 @Composable
 private fun SteamSyncStatusCard(
     uiState: WorkshopScreenUiState,
-    onOpenSteamSyncDialog: () -> Unit
+    onOpenSteamSyncDialog: () -> Unit,
+    onLogoutSteamSession: () -> Unit
 ) {
     val profile = uiState.syncProfile
     Card(
@@ -415,12 +421,16 @@ private fun SteamSyncStatusCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Sync,
+                    imageVector = if (uiState.hasSteamSession) Icons.Rounded.VerifiedUser else Icons.Rounded.Sync,
                     contentDescription = null,
                     tint = SteamNeon
                 )
                 Text(
-                    text = "STEAM-FAVORITER (MYFAVORITES)",
+                    text = if (uiState.hasSteamSession) {
+                        "STEAM-PRENUMERATIONER (INLOGGAD)"
+                    } else {
+                        "STEAM-FAVORITER & PRENUMERATIONER"
+                    },
                     fontFamily = JetBrainsMonoFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
@@ -428,25 +438,37 @@ private fun SteamSyncStatusCard(
                 )
             }
 
-            if (profile != null) {
+            if (uiState.hasSteamSession) {
                 Text(
-                    text = "Kopplad till SteamID ${profile.steamId64} • ${profile.syncedCount} synkade favoriter",
+                    text = "Inloggad som SteamID ${uiState.steamSessionSteamId64}" +
+                        if (profile != null) " • ${profile.syncedCount} synkade moddar" else "",
                     style = MaterialTheme.typography.titleSmall,
                     color = SteamTextPrimary
                 )
                 Text(
-                    text = "Hämtar dina publika Steam-favoriter (myfavorites). Steam döljer prenumerationer utanför webbläsaren, så använd stjärna/Favorit på Steam eller hjärtat här i appen.",
+                    text = "Hämtar alla dina prenumererade moddar (mysubscriptions) paginerat direkt med din lokala Steam-session.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SteamTextSecondary
+                )
+            } else if (profile != null) {
+                Text(
+                    text = "Kopplad till SteamID ${profile.steamId64} • ${profile.syncedCount} synkade moddar",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = SteamTextPrimary
+                )
+                Text(
+                    text = "Logga in med Steam för fullständiga prenumerationer (mysubscriptions), eller synka dina publika favoriter (myfavorites).",
                     style = MaterialTheme.typography.bodySmall,
                     color = SteamTextSecondary
                 )
             } else {
                 Text(
-                    text = "Importera dina publika Steam-favoriter",
+                    text = "Synka Steam-prenumerationer eller favoriter",
                     style = MaterialTheme.typography.titleSmall,
                     color = SteamTextPrimary
                 )
                 Text(
-                    text = "Steam begränsar prenumerationer till inloggade sessioner. Stjärnmarkera/favoritmarkera moddar på Steam (\"Favoriter\") så hämtar vi dem automatiskt, eller bokmärk direkt i SteamPulse.",
+                    text = "Logga in med Steam för att hämta alla dina prenumererade moddar automatiskt, eller ange ditt SteamID64 för publika favoriter.",
                     style = MaterialTheme.typography.bodySmall,
                     color = SteamTextSecondary
                 )
@@ -498,11 +520,40 @@ private fun SteamSyncStatusCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "Synka Steam-favoriter",
+                    text = if (uiState.hasSteamSession) "Synka Steam-prenumerationer" else "Synka Steam-moddar",
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     softWrap = false
                 )
+            }
+
+            if (uiState.hasSteamSession) {
+                OutlinedButton(
+                    onClick = {
+                        clearSteamWebViewCookies()
+                        onLogoutSteamSession()
+                    },
+                    border = BorderStroke(1.dp, SteamBorder),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .minimumInteractiveComponentSize()
+                        .testTag("card_steam_logout_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.Logout,
+                        contentDescription = null,
+                        tint = SteamTextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Logga ut från Steam-synk",
+                        color = SteamTextSecondary,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
         }
     }
@@ -761,9 +812,13 @@ private fun ModThumbnailBox(
 internal fun SteamSyncSubscriptionsDialog(
     input: String,
     syncState: SteamSyncUiState,
+    hasSteamSession: Boolean = false,
+    steamSessionSteamId64: String = "",
     onInputChange: (String) -> Unit,
     onDismiss: () -> Unit,
-    onConfirmSync: () -> Unit
+    onConfirmSync: () -> Unit,
+    onOpenSteamLogin: () -> Unit = {},
+    onLogoutSteam: () -> Unit = {}
 ) {
     val isSyncing = syncState is SteamSyncUiState.Syncing
 
@@ -783,18 +838,110 @@ internal fun SteamSyncSubscriptionsDialog(
                     tint = SteamNeon
                 )
                 Text(
-                    text = "Synka Steam-favoriter",
+                    text = if (hasSteamSession) "Synka Steam-prenumerationer" else "Synka Steam-moddar",
                     style = MaterialTheme.typography.titleMedium
                 )
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Steam begränsar prenumerationer (mysubscriptions) till inloggade webbläsarsessioner. Stjärnmarkera/favoritmarkera moddar på Steam (\"Favoriter\") eller bokmärk dem direkt i SteamPulse, och ange ditt 17-siffriga SteamID64 eller Steam-profil-URL nedan.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SteamTextSecondary
-                )
+                if (hasSteamSession) {
+                    Surface(
+                        color = SteamNeon.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, SteamNeon.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.VerifiedUser,
+                                contentDescription = null,
+                                tint = SteamNeon,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Steam-inloggning aktiv",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = SteamNeon
+                                )
+                                Text(
+                                    text = "SteamID $steamSessionSteamId64 • Hämtar hela din prenumerationslista (mysubscriptions).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SteamTextSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            clearSteamWebViewCookies()
+                            onLogoutSteam()
+                        },
+                        enabled = !isSyncing,
+                        border = BorderStroke(1.dp, SteamBorder),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .testTag("steam_logout_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.Logout,
+                            contentDescription = null,
+                            tint = SteamTextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Logga ut från Steam-synk",
+                            color = SteamTextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Steam begränsar prenumerationer (mysubscriptions) till inloggade sessioner. Logga in med Steam i appen för att hämta alla prenumerade moddar, eller ange SteamID64 nedan för att synka publika Favoriter.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SteamTextSecondary
+                    )
+
+                    Button(
+                        onClick = onOpenSteamLogin,
+                        enabled = !isSyncing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SteamAccent,
+                            contentColor = Color(0xFF020617)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .testTag("steam_webview_login_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.LockOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Logga in med Steam (synka prenumerationer)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
                 OutlinedTextField(
                     value = input,
                     onValueChange = onInputChange,
@@ -823,7 +970,11 @@ internal fun SteamSyncSubscriptionsDialog(
                         .testTag("steam_sync_profile_input")
                 )
                 Text(
-                    text = "Obs: Din Steam-profil och \"Speldetaljer\" (Game Details) måste vara inställda på Offentlig i Steams sekretessinställningar för att dina publika Steam-favoriter ska kunna läsas.",
+                    text = if (hasSteamSession) {
+                        "Sessionscookien sparas endast lokalt på enheten och skickas aldrig till Firebase."
+                    } else {
+                        "Obs: Utan Steam-inloggning krävs offentlig profil & \"Speldetaljer\" (Game Details) för att läsa publika favoriter (myfavorites)."
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = SteamTextMuted
                 )
@@ -903,7 +1054,7 @@ internal fun SteamSyncSubscriptionsDialog(
         confirmButton = {
             Button(
                 onClick = onConfirmSync,
-                enabled = !isSyncing && input.isNotBlank(),
+                enabled = !isSyncing && (hasSteamSession || input.isNotBlank()),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = SteamNeon,
                     contentColor = Color(0xFF020617)

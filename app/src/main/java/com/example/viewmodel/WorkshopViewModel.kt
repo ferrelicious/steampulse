@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.SteamProfilePrivateException
+import com.example.data.SteamSessionExpiredException
 import com.example.data.SteamWorkshopRepository
 import com.example.data.WorkshopFollowRepository
 import com.example.data.WorkshopLocalStore
@@ -56,7 +57,10 @@ data class WorkshopScreenUiState(
     val followedNewModsFeed: WorkshopFollowedFeedUiState = WorkshopFollowedFeedUiState.Idle,
     val steamSyncState: SteamSyncUiState = SteamSyncUiState.Idle,
     val showSteamSyncDialog: Boolean = false,
-    val steamProfileInput: String = ""
+    val showSteamWebViewLoginDialog: Boolean = false,
+    val steamProfileInput: String = "",
+    val hasSteamSession: Boolean = false,
+    val steamSessionSteamId64: String = ""
 ) {
     val isShowingStoreSearch: Boolean
         get() = storeSearchResults != null
@@ -108,6 +112,7 @@ class WorkshopViewModel(
     private val pendingLocalModIds = mutableSetOf<String>()
     private val removedModIds = mutableSetOf<String>()
     private var hasPendingLocalSyncProfile = false
+    private var steamSessionCookie: String = ""
 
     private var loadGamesJob: Job? = null
     private var searchStoreJob: Job? = null
@@ -128,19 +133,31 @@ class WorkshopViewModel(
     private fun hydrateFromLocalStore() {
         val store = localStore ?: return
         val snapshot = store.loadSnapshot(storeUserKey())
-        if (snapshot.followedGames.isEmpty() && snapshot.followedMods.isEmpty() && snapshot.syncProfile == null) {
+        steamSessionCookie = snapshot.steamSessionCookie
+        val sessionId64 = snapshot.steamSessionSteamId64
+            .ifBlank { SteamWorkshopRepository.extractSteamId64FromCookie(snapshot.steamSessionCookie).orEmpty() }
+        val isSessionActive = snapshot.steamSessionCookie.isNotBlank() && sessionId64.isNotBlank()
+
+        if (snapshot.followedGames.isEmpty() &&
+            snapshot.followedMods.isEmpty() &&
+            snapshot.syncProfile == null &&
+            !isSessionActive
+        ) {
             return
         }
         _uiState.update { current ->
             val prefill = current.steamProfileInput.ifBlank {
                 snapshot.syncProfile?.profileInput.orEmpty()
                     .ifBlank { snapshot.syncProfile?.steamId64.orEmpty() }
+                    .ifBlank { sessionId64 }
             }
             current.copy(
                 followedGames = snapshot.followedGames,
                 followedMods = snapshot.followedMods,
                 syncProfile = snapshot.syncProfile,
-                steamProfileInput = prefill
+                steamProfileInput = prefill,
+                hasSteamSession = isSessionActive,
+                steamSessionSteamId64 = if (isSessionActive) sessionId64 else ""
             )
         }
         lastFeedGameIds = snapshot.followedGames.map { it.appId }.toSet()
@@ -504,6 +521,7 @@ class WorkshopViewModel(
             val prefill = current.steamProfileInput.ifBlank {
                 current.syncProfile?.profileInput.orEmpty()
                     .ifBlank { current.syncProfile?.steamId64.orEmpty() }
+                    .ifBlank { current.steamSessionSteamId64 }
             }
             current.copy(
                 showSteamSyncDialog = true,
@@ -530,15 +548,59 @@ class WorkshopViewModel(
         }
     }
 
+    fun openSteamWebViewLoginDialog() {
+        _uiState.update { it.copy(showSteamWebViewLoginDialog = true) }
+    }
+
+    fun dismissSteamWebViewLoginDialog() {
+        _uiState.update { it.copy(showSteamWebViewLoginDialog = false) }
+    }
+
+    fun onSteamWebViewAuthenticated(steamId64: String, cookieString: String) {
+        val cleanCookie = cookieString.trim()
+        val cleanSteamId = steamId64.trim()
+        if (cleanCookie.isBlank() || cleanSteamId.isBlank()) return
+
+        // Strictly local device storage — NEVER uploaded to Firebase Firestore.
+        steamSessionCookie = cleanCookie
+        localStore?.saveSteamSession(storeUserKey(), cleanSteamId, cleanCookie)
+
+        _uiState.update { current ->
+            current.copy(
+                showSteamWebViewLoginDialog = false,
+                hasSteamSession = true,
+                steamSessionSteamId64 = cleanSteamId,
+                steamProfileInput = cleanSteamId,
+                steamSyncState = SteamSyncUiState.Idle
+            )
+        }
+        syncSteamSubscriptions()
+    }
+
+    fun logoutSteamSession() {
+        steamSessionCookie = ""
+        localStore?.clearSteamSession(storeUserKey())
+        _uiState.update { current ->
+            current.copy(
+                hasSteamSession = false,
+                steamSessionSteamId64 = "",
+                steamSyncState = SteamSyncUiState.Idle
+            )
+        }
+        _toastEvents.tryEmit("Loggade ut från Steam-synk")
+    }
+
     fun updateSteamProfileInput(input: String) {
         _uiState.update { it.copy(steamProfileInput = input) }
     }
 
     fun syncSteamSubscriptions() {
+        val sessionCookieSnapshot = steamSessionCookie.takeIf { it.isNotBlank() }
         val rawInput = _uiState.value.steamProfileInput.trim()
-        if (rawInput.isBlank()) {
+            .ifBlank { _uiState.value.steamSessionSteamId64.trim() }
+        if (rawInput.isBlank() && sessionCookieSnapshot == null) {
             _uiState.update {
-                it.copy(steamSyncState = SteamSyncUiState.Error("Ange ditt SteamID64 eller din Steam-profil-URL."))
+                it.copy(steamSyncState = SteamSyncUiState.Error("Ange ditt SteamID64, din Steam-profil-URL eller logga in med Steam."))
             }
             return
         }
@@ -549,7 +611,10 @@ class WorkshopViewModel(
             _uiState.update { it.copy(steamSyncState = SteamSyncUiState.Syncing) }
             try {
                 // Step 1: Fetch and parse directly from steamcommunity.com FIRST, completely decoupled from Firestore.
-                val syncResult = repository.fetchSubscribedWorkshopMods(rawInput)
+                val syncResult = repository.fetchSubscribedWorkshopMods(
+                    rawProfileInput = rawInput,
+                    sessionCookie = sessionCookieSnapshot
+                )
                 val nowTs = Timestamp.now()
                 val newProfile = SteamWorkshopSyncProfile(
                     id = WorkshopFollowRepository.SYNC_DOC_ID,
@@ -604,10 +669,21 @@ class WorkshopViewModel(
                             showSteamSyncDialog = false
                         )
                     }
-                    _toastEvents.tryEmit("Synkade ${syncResult.mods.size} Steam-favoriter")
+                    _toastEvents.tryEmit(
+                        if (syncResult.isAuthenticatedSubscriptions) {
+                            "Synkade ${syncResult.mods.size} prenumererade moddar från Steam"
+                        } else {
+                            "Synkade ${syncResult.mods.size} Steam-favoriter"
+                        }
+                    )
                 } else {
                     hasPendingLocalSyncProfile = true
                     localStore?.saveSyncProfile(storeKey, newProfile)
+                    val emptyMsg = if (syncResult.isAuthenticatedSubscriptions) {
+                        "0 prenumererade Workshop-moddar hittades på ditt Steam-konto (${syncResult.steamId64})."
+                    } else {
+                        "0 publika Steam-favoriter (myfavorites) hittades. Steam begränsar \"mysubscriptions\" till inloggade webbläsarsessioner — logga in med Steam för att synka dina prenumerationer, favoritmarkera moddar på Steam eller bokmärk dem direkt i SteamPulse."
+                    }
                     _uiState.update {
                         it.copy(
                             syncProfile = newProfile,
@@ -615,21 +691,21 @@ class WorkshopViewModel(
                                 steamId64 = syncResult.steamId64,
                                 queriedUrl = syncResult.queriedUrl,
                                 httpStatusCode = syncResult.httpStatusCode,
-                                message = "0 publika Steam-favoriter (myfavorites) hittades. Steam begränsar \"mysubscriptions\" till inloggade webbläsarsessioner — stjärnmarkera/favoritmarkera moddar på Steam (\"Favoriter\") eller bokmärk dem direkt i SteamPulse."
+                                message = emptyMsg
                             ),
                             showSteamSyncDialog = true
                         )
                     }
                 }
 
-                // Step 3: Non-blocking background sync to Firestore; never fails or blocks the Steam dialog.
+                // Step 3: Non-blocking background sync to Firestore (NEVER uploads steamSessionCookie); never fails or blocks the Steam dialog.
                 val repo = followRepository
                 if (repo != null && !userId.isNullOrBlank()) {
                     viewModelScope.launch {
                         try {
                             repo.syncSubscribedMods(
                                 steamId64 = syncResult.steamId64,
-                                profileInput = rawInput,
+                                profileInput = rawInput.ifBlank { syncResult.steamId64 },
                                 syncedMods = syncResult.mods
                             ).onSuccess {
                                 pendingLocalModIds.removeAll(syncResult.mods.map { it.publishedFileId }.toSet())
@@ -646,16 +722,28 @@ class WorkshopViewModel(
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: SteamSessionExpiredException) {
+                steamSessionCookie = ""
+                localStore?.clearSteamSession(storeKey)
+                _uiState.update {
+                    it.copy(
+                        hasSteamSession = false,
+                        steamSessionSteamId64 = "",
+                        steamSyncState = SteamSyncUiState.Error(
+                            e.message ?: "Din Steam-session har gått ut. Logga in med Steam igen."
+                        )
+                    )
+                }
             } catch (e: SteamProfilePrivateException) {
                 _uiState.update {
                     it.copy(steamSyncState = SteamSyncUiState.Error(e.message ?: "Steam-profilen är privat."))
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed syncing Steam subscriptions for '$rawInput'", e)
+                Log.e(TAG, "Failed syncing Steam subscriptions/favorites for '$rawInput'", e)
                 _uiState.update {
                     it.copy(
                         steamSyncState = SteamSyncUiState.Error(
-                            e.localizedMessage ?: "Kunde inte synka Steam-favoriter."
+                            e.localizedMessage ?: "Kunde inte synka Steam-moddar."
                         )
                     )
                 }

@@ -133,7 +133,11 @@ fun WorkshopScreen(
     onOpenSteamSyncDialog: () -> Unit = {},
     onDismissSteamSyncDialog: () -> Unit = {},
     onSteamProfileInputChange: (String) -> Unit = {},
-    onSubmitSteamSync: () -> Unit = {}
+    onSubmitSteamSync: () -> Unit = {},
+    onOpenSteamWebViewLogin: () -> Unit = {},
+    onDismissSteamWebViewLogin: () -> Unit = {},
+    onSteamWebViewAuthenticated: (String, String) -> Unit = { _, _ -> },
+    onLogoutSteamSession: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val openUrl: (String) -> Unit = { url ->
@@ -173,7 +177,8 @@ fun WorkshopScreen(
                     onOpenModDetail = onOpenModDetail,
                     onToggleBookmarkMod = onToggleBookmarkMod,
                     onRemoveFollowedMod = onRemoveFollowedMod,
-                    onOpenSteamSyncDialog = onOpenSteamSyncDialog
+                    onOpenSteamSyncDialog = onOpenSteamSyncDialog,
+                    onLogoutSteamSession = onLogoutSteamSession
                 )
             }
         }
@@ -220,9 +225,20 @@ fun WorkshopScreen(
         SteamSyncSubscriptionsDialog(
             input = uiState.steamProfileInput,
             syncState = uiState.steamSyncState,
+            hasSteamSession = uiState.hasSteamSession,
+            steamSessionSteamId64 = uiState.steamSessionSteamId64,
             onInputChange = onSteamProfileInputChange,
             onDismiss = onDismissSteamSyncDialog,
-            onConfirmSync = onSubmitSteamSync
+            onConfirmSync = onSubmitSteamSync,
+            onOpenSteamLogin = onOpenSteamWebViewLogin,
+            onLogoutSteam = onLogoutSteamSession
+        )
+    }
+
+    if (uiState.showSteamWebViewLoginDialog) {
+        SteamWebViewLoginDialog(
+            onDismiss = onDismissSteamWebViewLogin,
+            onSteamLoginCaptured = onSteamWebViewAuthenticated
         )
     }
 }

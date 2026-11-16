@@ -543,7 +543,11 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                                     onOpenSteamSyncDialog = workshopViewModel::openSteamSyncDialog,
                                     onDismissSteamSyncDialog = workshopViewModel::dismissSteamSyncDialog,
                                     onSteamProfileInputChange = workshopViewModel::updateSteamProfileInput,
-                                    onSubmitSteamSync = workshopViewModel::syncSteamSubscriptions
+                                    onSubmitSteamSync = workshopViewModel::syncSteamSubscriptions,
+                                    onOpenSteamWebViewLogin = workshopViewModel::openSteamWebViewLoginDialog,
+                                    onDismissSteamWebViewLogin = workshopViewModel::dismissSteamWebViewLoginDialog,
+                                    onSteamWebViewAuthenticated = workshopViewModel::onSteamWebViewAuthenticated,
+                                    onLogoutSteamSession = workshopViewModel::logoutSteamSession
                                 )
 
                                 AppTab.WATCHLIST -> WatchlistScreen(

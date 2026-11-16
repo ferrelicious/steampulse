@@ -29,6 +29,8 @@ import java.util.concurrent.TimeUnit
 
 class SteamProfilePrivateException(message: String) : IOException(message)
 
+class SteamSessionExpiredException(message: String) : IOException(message)
+
 class SteamWorkshopRepository(
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -189,7 +191,10 @@ class SteamWorkshopRepository(
         )
     }
 
-    private fun executeSteamGet(url: String): HttpFetchOutcome {
+    private fun executeSteamGet(
+        url: String,
+        cookieHeader: String = STEAM_AGE_BYPASS_COOKIE
+    ): HttpFetchOutcome {
         val acceptHeader = if (url.contains("ajax=1")) {
             "application/json, text/javascript, */*; q=0.01"
         } else {
@@ -200,7 +205,7 @@ class SteamWorkshopRepository(
             .header("User-Agent", DESKTOP_USER_AGENT)
             .header("Accept", acceptHeader)
             .header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8")
-            .header("Cookie", STEAM_AGE_BYPASS_COOKIE)
+            .header("Cookie", cookieHeader)
             .apply {
                 if (url.contains("ajax=1")) {
                     header("X-Requested-With", "XMLHttpRequest")
@@ -407,32 +412,75 @@ class SteamWorkshopRepository(
     }
 
     suspend fun fetchSubscribedWorkshopMods(
-        rawProfileInput: String
+        rawProfileInput: String,
+        sessionCookie: String? = null
     ): SteamSubscribedSyncResult = withContext(Dispatchers.IO) {
-        val steamId64 = resolveSteamId64(rawProfileInput)
+        val sessionSteamId = sessionCookie?.let { extractSteamId64FromCookie(it) }
+        val useAuthenticatedSubscriptions = !sessionCookie.isNullOrBlank() && sessionSteamId != null
+
+        val steamId64 = if (useAuthenticatedSubscriptions && rawProfileInput.isBlank()) {
+            sessionSteamId!!
+        } else if (rawProfileInput.isNotBlank()) {
+            val resolved = runCatching { resolveSteamId64(rawProfileInput) }.getOrNull()
+            resolved ?: sessionSteamId ?: resolveSteamId64(rawProfileInput)
+        } else {
+            resolveSteamId64(rawProfileInput)
+        }
+
+        val effectiveCookie = if (useAuthenticatedSubscriptions) {
+            buildAuthenticatedCookieHeader(sessionCookie!!)
+        } else {
+            STEAM_AGE_BYPASS_COOKIE
+        }
+        val maxPages = if (useAuthenticatedSubscriptions) 10 else 3
+
         val collectedRaw = linkedMapOf<String, WorkshopModItem>()
-        var firstUrl = buildFavoriteWorkshopUrl(steamId64, 1)
+        var firstUrl = if (useAuthenticatedSubscriptions) {
+            buildSubscriptionsWorkshopUrl(steamId64, 1)
+        } else {
+            buildFavoriteWorkshopUrl(steamId64, 1)
+        }
         var firstStatusCode = 200
 
-        for (page in 1..3) {
-            val url = buildFavoriteWorkshopUrl(steamId64, page)
-            val outcome = executeSteamGet(url)
+        for (page in 1..maxPages) {
+            val url = if (useAuthenticatedSubscriptions) {
+                buildSubscriptionsWorkshopUrl(steamId64, page)
+            } else {
+                buildFavoriteWorkshopUrl(steamId64, page)
+            }
+            val outcome = executeSteamGet(url, effectiveCookie)
             if (page == 1) {
                 firstUrl = outcome.requestedUrl
                 firstStatusCode = outcome.statusCode
             }
+
+            if (useAuthenticatedSubscriptions) {
+                val finalPath = runCatching { java.net.URI(outcome.finalUrl).path }.getOrNull().orEmpty()
+                if (finalPath.startsWith("/login", ignoreCase = true)) {
+                    throw SteamSessionExpiredException(
+                        "Din Steam-inloggning har gått ut. Logga in med Steam igen för att synka prenumerationer."
+                    )
+                }
+            }
+
             if (isPrivateSteamProfileHtml(outcome.body)) {
                 throw SteamProfilePrivateException(PRIVATE_PROFILE_ERROR_MSG)
             }
             val parsed = parseWorkshopResponseBody(outcome.body, appId = 0)
             if (parsed.isEmpty()) break
+
+            var newItemsOnPage = 0
             parsed.forEach { item ->
                 if (!collectedRaw.containsKey(item.publishedFileId)) {
                     collectedRaw[item.publishedFileId] = item
+                    newItemsOnPage++
                 }
             }
+            if (newItemsOnPage == 0) break
+
             val hasNextPage = outcome.body.contains("p=${page + 1}", ignoreCase = true) ||
-                outcome.body.contains("ShowPage( ${page + 1}", ignoreCase = true)
+                outcome.body.contains("ShowPage( ${page + 1}", ignoreCase = true) ||
+                parsed.size >= 24
             if (!hasNextPage) break
         }
 
@@ -441,7 +489,8 @@ class SteamWorkshopRepository(
                 steamId64 = steamId64,
                 mods = emptyList(),
                 queriedUrl = firstUrl,
-                httpStatusCode = firstStatusCode
+                httpStatusCode = firstStatusCode,
+                isAuthenticatedSubscriptions = useAuthenticatedSubscriptions
             )
         }
 
@@ -491,7 +540,8 @@ class SteamWorkshopRepository(
             steamId64 = steamId64,
             mods = firestoreMods,
             queriedUrl = firstUrl,
-            httpStatusCode = firstStatusCode
+            httpStatusCode = firstStatusCode,
+            isAuthenticatedSubscriptions = useAuthenticatedSubscriptions
         )
     }
 
@@ -641,6 +691,7 @@ class SteamWorkshopRepository(
         )
 
         private val STEAM_ID64_REGEX = Regex("""\b7656119\d{10}\b""")
+        private val STEAM_LOGIN_SECURE_REGEX = Regex("""(?:^|;\s*)steamLoginSecure=([^;]+)""", RegexOption.IGNORE_CASE)
         private val PROFILE_ID64_URL_REGEX = Regex("""steamcommunity\.com/profiles/(\d{17})""", RegexOption.IGNORE_CASE)
         private val VANITY_URL_REGEX = Regex("""steamcommunity\.com/id/([^/?#]+)""", RegexOption.IGNORE_CASE)
         private val XML_STEAM_ID64_REGEX = Regex("""<steamID64>(\d{17})</steamID64>""", RegexOption.IGNORE_CASE)
@@ -694,12 +745,40 @@ class SteamWorkshopRepository(
         private val DETAIL_DESC_REGEX = Regex("""id="highlightContent"[^>]*>(.*?)</div>\s*</div>""", RegexOption.DOT_MATCHES_ALL)
         private val SUBSCRIBERS_STAT_REGEX = Regex("""<tr>\s*<td>([\d, ]+)</td>\s*<td>\s*Current Subscribers""", RegexOption.IGNORE_CASE)
 
+        fun buildSubscriptionsWorkshopUrl(steamId64: String, page: Int = 1): String {
+            return "https://steamcommunity.com/profiles/$steamId64/myworkshopfiles/?browsefilter=mysubscriptions&p=$page&numperpage=30"
+        }
+
         fun buildFavoriteWorkshopUrl(steamId64: String, page: Int = 1): String {
             return "https://steamcommunity.com/profiles/$steamId64/myworkshopfiles/?browsefilter=myfavorites&p=$page&numperpage=30"
         }
 
         fun buildSubscribedWorkshopUrl(steamId64: String, page: Int = 1): String =
             buildFavoriteWorkshopUrl(steamId64, page)
+
+        fun extractSteamId64FromCookie(cookieString: String): String? {
+            if (cookieString.isBlank()) return null
+            val rawValue = STEAM_LOGIN_SECURE_REGEX.find(cookieString)?.groupValues?.getOrNull(1)
+                ?.trim()
+                ?.removeSurrounding("\"")
+                ?: return null
+            val prefix = rawValue
+                .replace("%7C", "|", ignoreCase = true)
+                .substringBefore("||")
+                .trim()
+            return if (STEAM_ID64_REGEX.matches(prefix)) prefix else null
+        }
+
+        fun buildAuthenticatedCookieHeader(sessionCookie: String): String {
+            val trimmed = sessionCookie.trim().trimEnd(';')
+            if (trimmed.isBlank()) return STEAM_AGE_BYPASS_COOKIE
+            val extras = buildList {
+                if (!trimmed.contains("birthtime=", ignoreCase = true)) add("birthtime=0")
+                if (!trimmed.contains("lastagecheckage=", ignoreCase = true)) add("lastagecheckage=1-0-1990")
+                if (!trimmed.contains("wants_mature_content=", ignoreCase = true)) add("wants_mature_content=1")
+            }
+            return if (extras.isEmpty()) trimmed else "$trimmed; ${extras.joinToString("; ")}"
+        }
 
         fun extractSteamId64FromInput(rawInput: String): String? {
             val trimmed = rawInput.trim()

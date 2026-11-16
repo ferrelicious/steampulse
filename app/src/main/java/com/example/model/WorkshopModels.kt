@@ -183,7 +183,8 @@ data class SteamSubscribedSyncResult(
     val steamId64: String,
     val mods: List<FollowedWorkshopMod>,
     val queriedUrl: String,
-    val httpStatusCode: Int
+    val httpStatusCode: Int,
+    val isAuthenticatedSubscriptions: Boolean = false
 )
 
 sealed interface SteamSyncUiState {
