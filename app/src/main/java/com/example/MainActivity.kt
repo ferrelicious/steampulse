@@ -669,6 +669,10 @@ private fun AuthenticatedAppShell(
 
                                 AppTab.IMAGE_STUDIO -> PulseCardStudioScreen(
                                     viewModel = pulseCardStudioViewModel,
+                                    pulsGames = uiState.games,
+                                    followedGames = workshopState.followedGames,
+                                    followedMods = workshopState.followedMods,
+                                    currency = uiState.currency,
                                     onShowMessage = { msg ->
                                         scope.launch { snackbarHostState.showSnackbar(msg) }
                                     }

@@ -38,14 +38,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.SteamGamesCatalog
 import com.example.model.CurrencyMode
-import com.example.model.SteamGame
 import com.example.model.WorkshopModItem
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
@@ -56,6 +57,8 @@ import com.example.ui.theme.SteamSurface
 import com.example.ui.theme.SteamTextMuted
 import com.example.ui.theme.SteamTextPrimary
 import com.example.ui.theme.SteamTextSecondary
+import com.example.viewmodel.PulseCardGameOption
+import java.util.Locale
 
 class ComposeCardCaptureView @JvmOverloads constructor(
     context: Context,
@@ -65,56 +68,68 @@ class ComposeCardCaptureView @JvmOverloads constructor(
 
     private val composeView = ComposeView(context).apply {
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-        addView(this)
     }
 
-    private var currentGame by mutableStateOf<SteamGame?>(null)
+    private var currentGame by mutableStateOf<PulseCardGameOption?>(null)
     private var currentMods by mutableStateOf<List<WorkshopModItem>>(emptyList())
+    private var currentCurrency by mutableStateOf(CurrencyMode.SEK)
     private var showPlayers by mutableStateOf(true)
     private var showDeal by mutableStateOf(true)
     private var showMods by mutableStateOf(false)
+    private var isLoadingMods by mutableStateOf(false)
 
     init {
+        addView(composeView)
         composeView.setContent {
             SteamPulseCardContent(
-                game = currentGame,
+                gameOption = currentGame,
                 mods = currentMods,
+                currency = currentCurrency,
                 showPlayers = showPlayers,
                 showDeal = showDeal,
-                showMods = showMods
+                showMods = showMods,
+                isLoadingMods = isLoadingMods
             )
         }
     }
 
     fun setCardData(
-        game: SteamGame?,
+        gameOption: PulseCardGameOption?,
         mods: List<WorkshopModItem>,
+        currency: CurrencyMode,
         showPlayers: Boolean,
         showDeal: Boolean,
-        showMods: Boolean
+        showMods: Boolean,
+        isLoadingMods: Boolean
     ) {
-        this.currentGame = game
+        this.currentGame = gameOption
         this.currentMods = mods
+        this.currentCurrency = currency
         this.showPlayers = showPlayers
         this.showDeal = showDeal
         this.showMods = showMods
+        this.isLoadingMods = isLoadingMods
     }
 }
 
 @Composable
 internal fun SteamPulseCardContent(
-    game: SteamGame?,
+    gameOption: PulseCardGameOption?,
     mods: List<WorkshopModItem>,
+    currency: CurrencyMode,
     showPlayers: Boolean,
     showDeal: Boolean,
-    showMods: Boolean
+    showMods: Boolean,
+    isLoadingMods: Boolean
 ) {
-    val bestOfferPair = game?.let { SteamGamesCatalog.getBestOffer(it) }
+    val context = LocalContext.current
+    val steamGame = gameOption?.steamGame
+    val bestOfferPair = steamGame?.let { SteamGamesCatalog.getBestOffer(it) }
     val bestOffer = bestOfferPair?.first
     val bestEur = bestOfferPair?.second ?: 0.0
-    val formattedPrice = SteamGamesCatalog.formatPrice(bestEur, CurrencyMode.SEK)
-    val discountPercent = game?.let { SteamGamesCatalog.getDiscountPercent(it) } ?: 0
-    val headerUrl = game?.let { "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${it.appId}/header.jpg" }
+    val formattedPrice = SteamGamesCatalog.formatPrice(bestEur, currency)
+    val discountPercent = steamGame?.let { SteamGamesCatalog.getDiscountPercent(it) } ?: 0
+    val headerUrl = gameOption?.headerImageUrl
 
     Box(
         modifier = Modifier
@@ -123,8 +138,12 @@ internal fun SteamPulseCardContent(
     ) {
         if (!headerUrl.isNullOrBlank()) {
             AsyncImage(
-                model = headerUrl,
-                contentDescription = null,
+                model = ImageRequest.Builder(context)
+                    .data(headerUrl)
+                    .allowHardware(false)
+                    .crossfade(false)
+                    .build(),
+                contentDescription = gameOption.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -136,8 +155,8 @@ internal fun SteamPulseCardContent(
                     .fillMaxHeight(0.55f)
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Transparent, Color(0xFF090D16)),
-                            startY = 200f
+                            listOf(Color.Black.copy(alpha = 0.25f), Color(0xFF090D16)),
+                            startY = 120f
                         )
                     )
             )
@@ -146,7 +165,7 @@ internal fun SteamPulseCardContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp),
+                .padding(18.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -161,7 +180,7 @@ internal fun SteamPulseCardContent(
                         border = BorderStroke(1.dp, SteamNeon.copy(alpha = 0.5f))
                     ) {
                         Text(
-                            text = "STEAM-PULSE INTEL",
+                            text = if (gameOption?.isFollowedWorkshop == true) "WORKSHOP & PULS" else "STEAM-PULSE INTEL",
                             fontFamily = JetBrainsMonoFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp,
@@ -186,26 +205,28 @@ internal fun SteamPulseCardContent(
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    text = game?.title ?: "Steam Game",
-                    style = MaterialTheme.typography.headlineMedium,
+                    text = gameOption?.title ?: "Steam-spel",
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = game?.developer ?: "Valve",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = SteamTextSecondary
+                    text = gameOption?.developer ?: "Steam",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SteamTextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (showPlayers && game != null) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (showPlayers && steamGame != null) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SteamSurface.copy(alpha = 0.9f)),
+                        colors = CardDefaults.cardColors(containerColor = SteamSurface.copy(alpha = 0.92f)),
                         border = BorderStroke(1.dp, SteamBorder),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -213,7 +234,7 @@ internal fun SteamPulseCardContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
+                                .padding(12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -221,24 +242,24 @@ internal fun SteamPulseCardContent(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Rounded.SportsEsports, contentDescription = null, tint = SteamAccent, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Rounded.SportsEsports, contentDescription = null, tint = SteamAccent, modifier = Modifier.size(18.dp))
                                 Column {
                                     Text("Spelare nu", style = MaterialTheme.typography.labelSmall, color = SteamTextSecondary)
-                                    Text(SteamGamesCatalog.formatNumber(game.playersNow), fontWeight = FontWeight.Bold, color = SteamTextPrimary, fontSize = 15.sp)
+                                    Text(SteamGamesCatalog.formatNumber(steamGame.playersNow), fontWeight = FontWeight.Bold, color = SteamTextPrimary, fontSize = 14.sp)
                                 }
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text("24h Peak", style = MaterialTheme.typography.labelSmall, color = SteamTextSecondary)
-                                Text(SteamGamesCatalog.formatNumber(game.peak24h), fontWeight = FontWeight.Bold, color = SteamTextSecondary, fontSize = 14.sp)
+                                Text(SteamGamesCatalog.formatNumber(steamGame.peak24h), fontWeight = FontWeight.Bold, color = SteamTextSecondary, fontSize = 13.sp)
                             }
                         }
                     }
                 }
 
-                if (showDeal && bestOffer != null) {
-                    val isHistLow = bestEur <= (game?.historicalLowEur ?: 0.0) && bestEur > 0.0
+                if (showDeal && steamGame != null && bestOffer != null) {
+                    val isHistLow = bestEur <= steamGame.historicalLowEur && bestEur > 0.0
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SteamSurface.copy(alpha = 0.9f)),
+                        colors = CardDefaults.cardColors(containerColor = SteamSurface.copy(alpha = 0.92f)),
                         border = BorderStroke(1.dp, SteamSale.copy(alpha = 0.5f)),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -246,7 +267,7 @@ internal fun SteamPulseCardContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
+                                .padding(12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -254,14 +275,19 @@ internal fun SteamPulseCardContent(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Rounded.LocalOffer, contentDescription = null, tint = SteamSale, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Rounded.LocalOffer, contentDescription = null, tint = SteamSale, modifier = Modifier.size(18.dp))
                                 Column {
                                     Text("Bästa pris hos ${bestOffer.store}", style = MaterialTheme.typography.labelSmall, color = SteamTextSecondary)
-                                    Text(formattedPrice, fontWeight = FontWeight.Black, color = SteamSale, fontSize = 16.sp)
+                                    Text(formattedPrice, fontWeight = FontWeight.Black, color = SteamSale, fontSize = 15.sp)
                                 }
                             }
                             Text(
-                                text = if (isHistLow) "HISTORISKT LÄGSTA" else "REA",
+                                text = when {
+                                    steamGame.isFreeToPlay && bestEur <= 0.0 -> "GRATIS"
+                                    isHistLow -> "HISTORISKT LÄGSTA"
+                                    discountPercent > 0 -> "-$discountPercent%"
+                                    else -> "PRIS"
+                                },
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,
@@ -271,9 +297,9 @@ internal fun SteamPulseCardContent(
                     }
                 }
 
-                if (showMods && mods.isNotEmpty()) {
+                if (showMods) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SteamSurface.copy(alpha = 0.9f)),
+                        colors = CardDefaults.cardColors(containerColor = SteamSurface.copy(alpha = 0.92f)),
                         border = BorderStroke(1.dp, SteamBorder),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -281,25 +307,57 @@ internal fun SteamPulseCardContent(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(Icons.Rounded.Extension, contentDescription = null, tint = SteamNeon, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.Extension, contentDescription = null, tint = SteamNeon, modifier = Modifier.size(15.dp))
                                 Text("Toppprenumererade Workshop-moddar", style = MaterialTheme.typography.labelMedium, color = SteamNeon, fontWeight = FontWeight.Bold)
                             }
-                            mods.take(3).forEach { mod ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(mod.title, style = MaterialTheme.typography.bodySmall, color = SteamTextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("${mod.subscriptionsCountFormatted} prenum.", fontFamily = JetBrainsMonoFontFamily, fontSize = 10.sp, color = SteamTextMuted)
+                            when {
+                                isLoadingMods && mods.isEmpty() -> {
+                                    Text(
+                                        text = "Hämtar Workshop-moddar...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SteamTextMuted
+                                    )
+                                }
+                                mods.isEmpty() -> {
+                                    Text(
+                                        text = "Inga Workshop-moddar hittades för detta spel",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SteamTextMuted
+                                    )
+                                }
+                                else -> {
+                                    mods.take(3).forEach { mod ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = mod.title,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = SteamTextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            mod.subscriptions?.let { subs ->
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = "${formatCompactCount(subs)} prenum.",
+                                                    fontFamily = JetBrainsMonoFontFamily,
+                                                    fontSize = 10.sp,
+                                                    color = SteamTextMuted
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -313,19 +371,28 @@ internal fun SteamPulseCardContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Genererad i SteamPulse",
+                    text = "SteamPulse",
                     fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 11.sp,
                     color = SteamTextMuted
                 )
                 Text(
-                    text = "steampulse.app",
+                    text = "AppID ${gameOption?.appId ?: 0}",
                     fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 10.sp,
                     color = SteamAccent
                 )
             }
         }
+    }
+}
+
+private fun formatCompactCount(count: Long): String {
+    return when {
+        count >= 1_000_000L -> String.format(Locale.forLanguageTag("sv-SE"), "%.1fM", count / 1_000_000.0)
+        count >= 1_000L -> String.format(Locale.forLanguageTag("sv-SE"), "%.1fk", count / 1_000.0)
+        else -> count.toString()
     }
 }

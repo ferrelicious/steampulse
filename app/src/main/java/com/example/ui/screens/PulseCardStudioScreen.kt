@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import android.content.ContentValues
-import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
@@ -44,6 +43,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +61,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.model.CurrencyMode
+import com.example.model.FollowedWorkshopGame
+import com.example.model.FollowedWorkshopMod
 import com.example.model.SteamGame
 import com.example.ui.theme.SteamAccent
 import com.example.ui.theme.SteamBg
@@ -79,8 +82,22 @@ import java.io.FileOutputStream
 @Composable
 fun PulseCardStudioScreen(
     viewModel: PulseCardStudioViewModel,
+    pulsGames: List<SteamGame> = emptyList(),
+    followedGames: List<FollowedWorkshopGame> = emptyList(),
+    followedMods: List<FollowedWorkshopMod> = emptyList(),
+    currency: CurrencyMode = CurrencyMode.SEK,
     onShowMessage: (String) -> Unit = {}
 ) {
+    LaunchedEffect(pulsGames, followedGames, followedMods) {
+        if (pulsGames.isNotEmpty() || followedGames.isNotEmpty()) {
+            viewModel.syncGames(
+                pulsGames = pulsGames,
+                followedGames = followedGames,
+                followedMods = followedMods
+            )
+        }
+    }
+
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val game = state.selectedGame ?: state.games.firstOrNull()
@@ -89,6 +106,7 @@ fun PulseCardStudioScreen(
 
     fun captureBitmap(): Bitmap? {
         val view = cardViewInstance ?: return null
+        if (view.width <= 0 || view.height <= 0) return null
         return runCatching {
             val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
             val canvas = android.graphics.Canvas(bitmap)
@@ -154,7 +172,6 @@ fun PulseCardStudioScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Header
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -179,14 +196,13 @@ fun PulseCardStudioScreen(
                     color = SteamTextPrimary
                 )
                 Text(
-                    text = "Skapa snygga deal- & modd-kort för sociala medier",
+                    text = "Skapa deal- & modd-kort från Puls och Workshop",
                     style = MaterialTheme.typography.bodyMedium,
                     color = SteamTextSecondary
                 )
             }
         }
 
-        // Controls Card
         Card(
             colors = CardDefaults.cardColors(containerColor = SteamSurface),
             border = BorderStroke(1.dp, SteamBorder),
@@ -197,9 +213,8 @@ fun PulseCardStudioScreen(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Game Selector
                 Text(
-                    text = "Välj Spel",
+                    text = "Välj Spel (Puls & Följda)",
                     style = MaterialTheme.typography.labelSmall,
                     color = SteamTextSecondary
                 )
@@ -209,10 +224,11 @@ fun PulseCardStudioScreen(
                 ) {
                     state.games.forEach { g ->
                         val selected = g.appId == game?.appId
+                        val chipLabel = if (g.isFollowedWorkshop) "★ ${g.title}" else g.title
                         FilterChip(
                             selected = selected,
                             onClick = { viewModel.selectGame(g) },
-                            label = { Text(g.title, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                            label = { Text(chipLabel, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = SteamAccent,
                                 selectedLabelColor = Color(0xFF020617),
@@ -223,7 +239,6 @@ fun PulseCardStudioScreen(
                     }
                 }
 
-                // Aspect Ratio Selector
                 Text(
                     text = "Format",
                     style = MaterialTheme.typography.labelSmall,
@@ -243,6 +258,7 @@ fun PulseCardStudioScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
+                                .testTag("aspect_ratio_${ratio.name.lowercase()}")
                         ) {
                             Box(
                                 modifier = Modifier
@@ -261,7 +277,6 @@ fun PulseCardStudioScreen(
                     }
                 }
 
-                // Toggles for stats
                 Text(
                     text = "Innehåll & Statistik",
                     style = MaterialTheme.typography.labelSmall,
@@ -305,7 +320,6 @@ fun PulseCardStudioScreen(
             }
         }
 
-        // Live Card Preview
         Text(
             text = "Kortförhandsvisning",
             style = MaterialTheme.typography.labelSmall,
@@ -330,17 +344,32 @@ fun PulseCardStudioScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         cardViewInstance = this
-                        setCardData(game, state.topMods, state.showPlayerCount, state.showBestDeal, state.showModList)
+                        setCardData(
+                            gameOption = game,
+                            mods = state.topMods,
+                            currency = currency,
+                            showPlayers = state.showPlayerCount,
+                            showDeal = state.showBestDeal,
+                            showMods = state.showModList,
+                            isLoadingMods = state.isLoadingMods
+                        )
                     }
                 },
                 update = { view ->
                     cardViewInstance = view
-                    view.setCardData(game, state.topMods, state.showPlayerCount, state.showBestDeal, state.showModList)
+                    view.setCardData(
+                        gameOption = game,
+                        mods = state.topMods,
+                        currency = currency,
+                        showPlayers = state.showPlayerCount,
+                        showDeal = state.showBestDeal,
+                        showMods = state.showModList,
+                        isLoadingMods = state.isLoadingMods
+                    )
                 }
             )
         }
 
-        // Action Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
