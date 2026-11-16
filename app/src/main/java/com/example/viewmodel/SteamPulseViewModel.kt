@@ -63,7 +63,7 @@ class SteamPulseViewModel(
 ) : ViewModel() {
 
     private val _baseGames = MutableStateFlow(SteamGamesCatalog.initialGames)
-    private val _currency = MutableStateFlow(CurrencyMode.SEK)
+    private val _currency = MutableStateFlow(localStore?.getPreferredCurrency(currentUserId) ?: CurrencyMode.SEK)
     private val _searchQuery = MutableStateFlow("")
     private val _selectedCategory = MutableStateFlow(GameCategory.ALL)
     private val _sortOrder = MutableStateFlow(SortOrder.PLAYERS_DESC)
@@ -235,6 +235,28 @@ class SteamPulseViewModel(
 
     fun setCurrency(currency: CurrencyMode) {
         _currency.value = currency
+        localStore?.setPreferredCurrency(currentUserId, currency)
+    }
+
+    fun reloadLocalDataFromStore() {
+        val store = localStore ?: return
+        _currency.value = store.getPreferredCurrency(currentUserId)
+        val restoredWatchlist = store.loadWatchlist(currentUserId)
+        _localWatchlist.value = restoredWatchlist
+        if (currentUserId != "guest" && restoredWatchlist.isNotEmpty()) {
+            viewModelScope.launch {
+                restoredWatchlist.forEach { item ->
+                    runCatching {
+                        watchlistRepository.upsertWatchlistItem(
+                            gameId = item.id,
+                            gameTitle = item.gameTitle,
+                            targetPriceEur = item.targetPriceEur,
+                            preferredCurrency = item.preferredCurrency
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun updateSearchQuery(query: String) {

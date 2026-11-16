@@ -300,7 +300,8 @@ fun WorkshopScreen(
         SteamDeepLinkHelper.openWorkshopModInSteam(
             context = context,
             publishedFileId = mod.publishedFileId,
-            itemUrl = mod.itemUrl
+            itemUrl = mod.itemUrl,
+            preferSteamApp = uiState.alwaysOpenModsInSteamApp
         )
     }
 

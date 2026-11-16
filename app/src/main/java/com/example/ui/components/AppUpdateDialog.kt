@@ -82,6 +82,8 @@ class AppUpdateCoordinator(
         private set
     var isChecking by mutableStateOf(false)
         private set
+    var lastManualCheckMessage by mutableStateOf<String?>(null)
+        private set
     var activeDownloadId by mutableStateOf<Long?>(null)
         private set
     var expectedApkFile by mutableStateOf<File?>(null)
@@ -93,31 +95,43 @@ class AppUpdateCoordinator(
         if (isChecking) return
         scope.launch {
             isChecking = true
+            if (manual) {
+                lastManualCheckMessage = "Söker..."
+            }
             try {
                 when (val outcome = manager.checkForUpdate(ignoreDismissed = manual)) {
                     is AppUpdateCheckOutcome.Available -> {
                         hasAvailableUpdate = true
                         pendingRelease = outcome.release
+                        if (manual) {
+                            lastManualCheckMessage = "Ny version hittades: ${outcome.release.tagName}"
+                        }
                     }
                     is AppUpdateCheckOutcome.Dismissed -> {
                         hasAvailableUpdate = true
                         if (manual) {
                             pendingRelease = outcome.release
+                            lastManualCheckMessage = "Ny version hittades: ${outcome.release.tagName}"
                         }
                     }
                     is AppUpdateCheckOutcome.UpToDate -> {
                         hasAvailableUpdate = false
                         if (manual) {
-                            onStatusMessage("Du har redan senaste versionen (v${BuildConfig.VERSION_NAME}).")
+                            val msg = "Du har redan den senaste versionen (v${BuildConfig.VERSION_NAME})"
+                            lastManualCheckMessage = msg
+                            onStatusMessage(msg)
                         }
                     }
                     is AppUpdateCheckOutcome.NoApkAsset -> {
                         if (manual) {
-                            onStatusMessage("Ingen APK hittades i den senaste GitHub-releasen.")
+                            val msg = "Ingen APK hittades i den senaste GitHub-releasen."
+                            lastManualCheckMessage = msg
+                            onStatusMessage(msg)
                         }
                     }
                     is AppUpdateCheckOutcome.Error -> {
                         if (manual) {
+                            lastManualCheckMessage = outcome.message
                             onStatusMessage(outcome.message)
                         }
                     }

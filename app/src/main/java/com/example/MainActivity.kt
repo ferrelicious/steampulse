@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Extension
@@ -109,6 +110,8 @@ import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ImageStudioScreen
 import com.example.ui.screens.PulseDealsScreen
 import com.example.ui.screens.ReleaseScreen
+import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.SteamWebViewLoginDialog
 import com.example.ui.screens.WatchlistScreen
 import com.example.ui.screens.WorkshopScreen
 import com.example.ui.theme.JetBrainsMonoFontFamily
@@ -228,6 +231,8 @@ fun AppNavigation(
                 launchIntent = launchIntent,
                 onConsumeLaunchIntent = onConsumeLaunchIntent,
                 hasAppUpdateAvailable = updateCoordinator.hasAvailableUpdate,
+                isCheckingAppUpdate = updateCoordinator.isChecking,
+                appUpdateStatusMessage = updateCoordinator.lastManualCheckMessage,
                 updateMessagesFlow = updateMessagesFlow,
                 onCheckForUpdate = { updateCoordinator.checkForUpdates(manual = true) },
                 onNavigateToLogin = {
@@ -260,6 +265,8 @@ private fun AuthenticatedAppShell(
     launchIntent: Intent? = null,
     onConsumeLaunchIntent: () -> Unit = {},
     hasAppUpdateAvailable: Boolean = false,
+    isCheckingAppUpdate: Boolean = false,
+    appUpdateStatusMessage: String? = null,
     updateMessagesFlow: MutableSharedFlow<String>? = null,
     onCheckForUpdate: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {}
@@ -319,12 +326,15 @@ private fun AuthenticatedAppShell(
 
     var currentTab by rememberSaveable { mutableStateOf(AppTab.PULSE) }
     var showReleasePage by rememberSaveable { mutableStateOf(false) }
+    var showSettingsPage by rememberSaveable { mutableStateOf(false) }
     var pendingAiPrompt by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val settingsLocalStore = remember(context) { WorkshopLocalStore(context) }
 
     LaunchedEffect(launchIntent) {
         val targetTab = launchIntent?.getStringExtra(WorkshopNotificationHelper.EXTRA_OPEN_TAB)
         if (targetTab == WorkshopNotificationHelper.TAB_WORKSHOP) {
+            showSettingsPage = false
             showReleasePage = false
             currentTab = AppTab.WORKSHOP
             val targetSection = launchIntent.getStringExtra(WorkshopNotificationHelper.EXTRA_OPEN_WORKSHOP_SECTION)
@@ -359,7 +369,11 @@ private fun AuthenticatedAppShell(
         }
     }
 
-    if (showReleasePage) {
+    if (showSettingsPage) {
+        BackHandler {
+            showSettingsPage = false
+        }
+    } else if (showReleasePage) {
         BackHandler {
             showReleasePage = false
         }
@@ -382,7 +396,14 @@ private fun AuthenticatedAppShell(
                 hasUpdateAvailable = releaseState.hasUpdateAvailable || hasAppUpdateAvailable,
                 onSelectCurrency = pulseViewModel::setCurrency,
                 onNavigateToLogin = onNavigateToLogin,
-                onOpenReleases = { showReleasePage = true },
+                onOpenReleases = {
+                    showSettingsPage = false
+                    showReleasePage = true
+                },
+                onOpenSettings = {
+                    showReleasePage = false
+                    showSettingsPage = true
+                },
                 onCheckForUpdate = onCheckForUpdate,
                 onSignOut = { signOut(credentialManager, scope) }
             )
@@ -399,6 +420,7 @@ private fun AuthenticatedAppShell(
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = {
+                                    showSettingsPage = false
                                     showReleasePage = false
                                     currentTab = tab
                                 },
@@ -449,6 +471,7 @@ private fun AuthenticatedAppShell(
                             NavigationRailItem(
                                 selected = selected,
                                 onClick = {
+                                    showSettingsPage = false
                                     showReleasePage = false
                                     currentTab = tab
                                 },
@@ -484,7 +507,70 @@ private fun AuthenticatedAppShell(
                             .widthIn(max = 900.dp)
                             .fillMaxSize()
                     ) {
-                        if (showReleasePage) {
+                        if (showSettingsPage) {
+                            SettingsScreen(
+                                isGuest = isGuest,
+                                userDisplayName = userDisplayName,
+                                userEmail = userEmail,
+                                hasSteamSession = workshopState.hasSteamSession,
+                                steamSessionSteamId64 = workshopState.steamSessionSteamId64,
+                                isCheckingForUpdate = isCheckingAppUpdate,
+                                updateStatusMessage = appUpdateStatusMessage,
+                                notificationsEnabled = workshopState.newModNotificationsEnabled,
+                                checkIntervalHours = workshopState.checkIntervalHours,
+                                notifyNewModsEnabled = workshopState.notifyNewModsEnabled,
+                                notifyModUpdatesEnabled = workshopState.notifyModUpdatesEnabled,
+                                quietHoursEnabled = workshopState.quietHoursEnabled,
+                                quietHoursStartHour = workshopState.quietHoursStartHour,
+                                quietHoursEndHour = workshopState.quietHoursEndHour,
+                                currency = uiState.currency,
+                                alwaysOpenModsInSteamApp = workshopState.alwaysOpenModsInSteamApp,
+                                onBack = { showSettingsPage = false },
+                                onCheckForUpdate = onCheckForUpdate,
+                                onOpenReleases = {
+                                    showSettingsPage = false
+                                    showReleasePage = true
+                                },
+                                onNavigateToLogin = {
+                                    showSettingsPage = false
+                                    onNavigateToLogin()
+                                },
+                                onSignOut = {
+                                    showSettingsPage = false
+                                    signOut(credentialManager, scope)
+                                },
+                                onConnectSteamSession = workshopViewModel::openSteamWebViewLoginDialog,
+                                onClearSteamSession = workshopViewModel::logoutSteamSession,
+                                onSetNotificationsEnabled = workshopViewModel::setNewModNotificationsEnabled,
+                                onSelectCheckIntervalHours = workshopViewModel::selectCheckIntervalHours,
+                                onSetNotifyNewModsEnabled = workshopViewModel::setNotifyNewModsEnabled,
+                                onSetNotifyModUpdatesEnabled = workshopViewModel::setNotifyModUpdatesEnabled,
+                                onSetQuietHoursEnabled = workshopViewModel::setQuietHoursEnabled,
+                                onSetQuietHoursRange = workshopViewModel::setQuietHoursRange,
+                                onSelectCurrency = pulseViewModel::setCurrency,
+                                onSetAlwaysOpenModsInSteamApp = workshopViewModel::setAlwaysOpenModsInSteamApp,
+                                onExportBackupJson = { settingsLocalStore.exportBackupJson(currentUserId) },
+                                onImportBackupJson = { rawJson ->
+                                    settingsLocalStore.importBackupJson(currentUserId, rawJson).also { result ->
+                                        if (result.success) {
+                                            workshopViewModel.reloadFromLocalStoreAfterRestore()
+                                            pulseViewModel.reloadLocalDataFromStore()
+                                        }
+                                    }
+                                },
+                                onClearCachedLists = workshopViewModel::clearCachedLists,
+                                onShowMessage = { msg ->
+                                    scope.launch { snackbarHostState.showSnackbar(msg) }
+                                }
+                            )
+
+                            if (workshopState.showSteamWebViewLoginDialog) {
+                                SteamWebViewLoginDialog(
+                                    onDismiss = workshopViewModel::dismissSteamWebViewLoginDialog,
+                                    onSteamLoginCaptured = workshopViewModel::onSteamWebViewAuthenticated
+                                )
+                            }
+                        } else if (showReleasePage) {
                             ReleaseScreen(
                                 uiState = releaseState,
                                 onRepoInputChange = releaseViewModel::updateRepoInput,
@@ -630,6 +716,7 @@ internal fun SteamPulseTopBar(
     onSelectCurrency: (CurrencyMode) -> Unit,
     onNavigateToLogin: () -> Unit,
     onOpenReleases: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     onCheckForUpdate: () -> Unit = {},
     onSignOut: () -> Unit
 ) {
@@ -643,12 +730,12 @@ internal fun SteamPulseTopBar(
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
-                        .clip(RoundedCornerShape(9.dp))
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(Brush.linearGradient(listOf(SteamAccent, SteamNeon))),
                     contentAlignment = Alignment.Center
                 ) {
@@ -656,14 +743,14 @@ internal fun SteamPulseTopBar(
                         imageVector = Icons.Rounded.Bolt,
                         contentDescription = null,
                         tint = Color(0xFF020617),
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
                 Column {
                     Text(
                         text = "SteamPulse",
                         style = MaterialTheme.typography.titleMedium,
-                        fontSize = 17.sp,
+                        fontSize = 16.sp,
                         color = SteamTextPrimary,
                         maxLines = 1,
                         softWrap = false,
@@ -687,7 +774,7 @@ internal fun SteamPulseTopBar(
                 color = SteamBg,
                 shape = RoundedCornerShape(9.dp),
                 border = BorderStroke(1.dp, SteamBorder),
-                modifier = Modifier.padding(end = 6.dp)
+                modifier = Modifier.padding(end = 4.dp)
             ) {
                 Row(modifier = Modifier.padding(2.dp)) {
                     CurrencyMode.entries.forEach { mode ->
@@ -702,11 +789,11 @@ internal fun SteamPulseTopBar(
                                 text = mode.code,
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 maxLines = 1,
                                 softWrap = false,
                                 color = if (active) Color(0xFF020617) else SteamTextSecondary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                             )
                         }
                     }
@@ -721,26 +808,25 @@ internal fun SteamPulseTopBar(
                     shape = RoundedCornerShape(9.dp),
                     border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.5f)),
                     modifier = Modifier
-                        .padding(end = 8.dp)
                         .minimumInteractiveComponentSize()
                         .testTag("guest_login_button")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Person,
                             contentDescription = "Logga in",
                             tint = SteamAccent,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = "Logga in",
                             fontFamily = JetBrainsMonoFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             maxLines = 1,
                             softWrap = false,
                             color = SteamAccent
@@ -751,7 +837,7 @@ internal fun SteamPulseTopBar(
                 val initial = (userDisplayName?.firstOrNull()
                     ?: userEmail?.firstOrNull()
                     ?: 'S').uppercaseChar().toString()
-                Box(modifier = Modifier.padding(end = 4.dp)) {
+                Box {
                     IconButton(
                         onClick = { accountMenuExpanded = true },
                         modifier = Modifier
@@ -760,7 +846,7 @@ internal fun SteamPulseTopBar(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(30.dp)
                                 .clip(CircleShape)
                                 .background(SteamAccent.copy(alpha = 0.18f)),
                             contentAlignment = Alignment.Center
@@ -769,7 +855,7 @@ internal fun SteamPulseTopBar(
                                 text = initial,
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 color = SteamAccent
                             )
                         }
@@ -863,6 +949,20 @@ internal fun SteamPulseTopBar(
                         )
                     }
                 }
+            }
+
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("settings_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Inställningar",
+                    tint = SteamTextPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     )

@@ -67,6 +67,12 @@ data class WorkshopScreenUiState(
     val followedGamesPreviousVisitEpochSec: Map<Int, Long> = emptyMap(),
     val newModNotificationsEnabled: Boolean = true,
     val checkIntervalHours: Long = WorkshopLocalStore.DEFAULT_CHECK_INTERVAL_HOURS,
+    val notifyNewModsEnabled: Boolean = true,
+    val notifyModUpdatesEnabled: Boolean = true,
+    val quietHoursEnabled: Boolean = false,
+    val quietHoursStartHour: Int = WorkshopLocalStore.DEFAULT_QUIET_START_HOUR,
+    val quietHoursEndHour: Int = WorkshopLocalStore.DEFAULT_QUIET_END_HOUR,
+    val alwaysOpenModsInSteamApp: Boolean = true,
     val followedModsFilterMode: FollowedModsFilterMode = FollowedModsFilterMode.ALL,
     val seenModUpdateEpochSec: Map<String, Long> = emptyMap()
 ) {
@@ -183,6 +189,12 @@ class WorkshopViewModel(
                 followedGamesPreviousVisitEpochSec = followedPrevMap,
                 newModNotificationsEnabled = store.isNewModNotificationsEnabled(storeKey),
                 checkIntervalHours = store.getCheckIntervalHours(storeKey),
+                notifyNewModsEnabled = store.isNotifyNewModsEnabled(storeKey),
+                notifyModUpdatesEnabled = store.isNotifyModUpdatesEnabled(storeKey),
+                quietHoursEnabled = store.isQuietHoursEnabled(storeKey),
+                quietHoursStartHour = store.getQuietHoursStart(storeKey),
+                quietHoursEndHour = store.getQuietHoursEnd(storeKey),
+                alwaysOpenModsInSteamApp = store.isAlwaysOpenModsInSteamApp(storeKey),
                 seenModUpdateEpochSec = seenUpdates
             )
         }
@@ -227,6 +239,89 @@ class WorkshopViewModel(
         val storeKey = storeUserKey()
         localStore?.setNewModNotificationsEnabled(storeKey, enabled)
         _uiState.update { it.copy(newModNotificationsEnabled = enabled) }
+    }
+
+    fun setNotifyNewModsEnabled(enabled: Boolean) {
+        val storeKey = storeUserKey()
+        localStore?.setNotifyNewModsEnabled(storeKey, enabled)
+        _uiState.update { it.copy(notifyNewModsEnabled = enabled) }
+    }
+
+    fun setNotifyModUpdatesEnabled(enabled: Boolean) {
+        val storeKey = storeUserKey()
+        localStore?.setNotifyModUpdatesEnabled(storeKey, enabled)
+        _uiState.update { it.copy(notifyModUpdatesEnabled = enabled) }
+    }
+
+    fun setQuietHoursEnabled(enabled: Boolean) {
+        val storeKey = storeUserKey()
+        localStore?.setQuietHoursEnabled(storeKey, enabled)
+        _uiState.update { it.copy(quietHoursEnabled = enabled) }
+    }
+
+    fun setQuietHoursRange(startHour: Int, endHour: Int) {
+        val storeKey = storeUserKey()
+        val safeStart = startHour.coerceIn(0, 23)
+        val safeEnd = endHour.coerceIn(0, 23)
+        localStore?.setQuietHoursStart(storeKey, safeStart)
+        localStore?.setQuietHoursEnd(storeKey, safeEnd)
+        _uiState.update {
+            it.copy(
+                quietHoursStartHour = safeStart,
+                quietHoursEndHour = safeEnd
+            )
+        }
+    }
+
+    fun setAlwaysOpenModsInSteamApp(enabled: Boolean) {
+        val storeKey = storeUserKey()
+        localStore?.setAlwaysOpenModsInSteamApp(storeKey, enabled)
+        _uiState.update { it.copy(alwaysOpenModsInSteamApp = enabled) }
+    }
+
+    fun clearCachedLists() {
+        cacheByMode.clear()
+        _uiState.update {
+            it.copy(
+                storeSearchResults = null,
+                storeSearchError = null,
+                selectedModDetail = null
+            )
+        }
+        loadTop100Games(_uiState.value.leaderboardMode)
+    }
+
+    fun reloadFromLocalStoreAfterRestore() {
+        hydrateFromLocalStore()
+        val games = _uiState.value.followedGames
+        val uid = userId?.takeIf { it.isNotBlank() && it != "guest" }
+        if (uid != null && followRepository != null && games.isNotEmpty()) {
+            viewModelScope.launch {
+                games.forEach { game ->
+                    runCatching {
+                        followRepository.followGame(
+                            game = WorkshopGameSummary(
+                                rank = 0,
+                                appId = game.appId,
+                                name = game.gameName,
+                                developer = game.developer,
+                                publisher = "",
+                                ccu = 0,
+                                ownersRange = "—",
+                                positiveReviews = 0,
+                                negativeReviews = 0,
+                                averagePlaytimeMinutes = 0,
+                                priceCents = 0,
+                                discountPercent = 0,
+                                isKnownWorkshopPowerhouse = SteamWorkshopRepository.KNOWN_WORKSHOP_APP_IDS.contains(game.appId),
+                                customImageUrl = game.headerImageUrl
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        refreshFollowedGamesFeed(games)
     }
 
     fun emitToast(message: String) {

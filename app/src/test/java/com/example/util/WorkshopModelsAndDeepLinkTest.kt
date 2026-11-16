@@ -236,4 +236,28 @@ class WorkshopModelsAndDeepLinkTest {
         assertEquals("steam://store/730", startedIntents[0].dataString)
         assertEquals("https://store.steampowered.com/app/730/", startedIntents[1].dataString)
     }
+
+    @Test
+    fun steamDeepLinkHelper_preferSteamAppFalse_opensBrowserDirectly() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val startedIntents = mutableListOf<Intent>()
+        val recordingContext = object : ContextWrapper(app) {
+            override fun startActivity(intent: Intent) {
+                startedIntents.add(intent)
+            }
+        }
+
+        val opened = SteamDeepLinkHelper.openWorkshopModInSteam(
+            context = recordingContext,
+            publishedFileId = "33991122",
+            itemUrl = "",
+            preferSteamApp = false
+        )
+        assertTrue(opened)
+        assertEquals(1, startedIntents.size)
+        assertEquals(
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=33991122",
+            startedIntents[0].dataString
+        )
+    }
 }

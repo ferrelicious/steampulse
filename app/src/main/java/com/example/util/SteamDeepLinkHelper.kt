@@ -60,10 +60,11 @@ object SteamDeepLinkHelper {
     fun openWorkshopModInSteam(
         context: Context,
         publishedFileId: String,
-        itemUrl: String = ""
+        itemUrl: String = "",
+        preferSteamApp: Boolean = true
     ): Boolean {
         val cleanId = publishedFileId.trim()
-        if (cleanId.isNotEmpty()) {
+        if (preferSteamApp && cleanId.isNotEmpty()) {
             try {
                 context.startActivity(buildSteamDeepLinkIntent(context, cleanId))
                 return true

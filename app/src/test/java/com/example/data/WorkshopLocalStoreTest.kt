@@ -286,6 +286,121 @@ class WorkshopLocalStoreTest {
         store.migrateGuestDataIfEmpty("user_wl_1")
         assertEquals(2, store.loadWatchlist("user_wl_1").size)
     }
+
+    @Test
+    fun settingsPreferencesAndQuietHoursWindow_persistEvaluateAndMigrate() {
+        // Overnight window 22:00..08:00
+        assertTrue(WorkshopLocalStore.isHourInQuietWindow(22, 22, 8))
+        assertTrue(WorkshopLocalStore.isHourInQuietWindow(23, 22, 8))
+        assertTrue(WorkshopLocalStore.isHourInQuietWindow(0, 22, 8))
+        assertTrue(WorkshopLocalStore.isHourInQuietWindow(7, 22, 8))
+        assertFalse(WorkshopLocalStore.isHourInQuietWindow(8, 22, 8))
+        assertFalse(WorkshopLocalStore.isHourInQuietWindow(15, 22, 8))
+        assertFalse(WorkshopLocalStore.isHourInQuietWindow(21, 22, 8))
+
+        // Same-day window 01:00..06:00
+        assertTrue(WorkshopLocalStore.isHourInQuietWindow(1, 1, 6))
+        assertTrue(WorkshopLocalStore.isHourInQuietWindow(5, 1, 6))
+        assertFalse(WorkshopLocalStore.isHourInQuietWindow(6, 1, 6))
+        assertFalse(WorkshopLocalStore.isHourInQuietWindow(0, 1, 6))
+
+        // Equal start and end -> empty window
+        assertFalse(WorkshopLocalStore.isHourInQuietWindow(10, 10, 10))
+
+        // Defaults & setters on guest
+        assertTrue(store.isNotifyNewModsEnabled("guest"))
+        assertTrue(store.isNotifyModUpdatesEnabled("guest"))
+        assertFalse(store.isQuietHoursEnabled("guest"))
+        assertEquals(22, store.getQuietHoursStart("guest"))
+        assertEquals(8, store.getQuietHoursEnd("guest"))
+        assertEquals(com.example.model.CurrencyMode.SEK, store.getPreferredCurrency("guest"))
+        assertTrue(store.isAlwaysOpenModsInSteamApp("guest"))
+
+        store.setNotifyNewModsEnabled("guest", false)
+        store.setNotifyModUpdatesEnabled("guest", false)
+        store.setQuietHoursEnabled("guest", true)
+        store.setQuietHoursStart("guest", 23)
+        store.setQuietHoursEnd("guest", 7)
+        store.setPreferredCurrency("guest", com.example.model.CurrencyMode.EUR)
+        store.setAlwaysOpenModsInSteamApp("guest", false)
+
+        store.migrateGuestDataIfEmpty("user_settings_migrated")
+        assertFalse(store.isNotifyNewModsEnabled("user_settings_migrated"))
+        assertFalse(store.isNotifyModUpdatesEnabled("user_settings_migrated"))
+        assertTrue(store.isQuietHoursEnabled("user_settings_migrated"))
+        assertEquals(23, store.getQuietHoursStart("user_settings_migrated"))
+        assertEquals(7, store.getQuietHoursEnd("user_settings_migrated"))
+        assertEquals(com.example.model.CurrencyMode.EUR, store.getPreferredCurrency("user_settings_migrated"))
+        assertFalse(store.isAlwaysOpenModsInSteamApp("user_settings_migrated"))
+    }
+
+    @Test
+    fun exportBackupJson_andImportBackupJson_roundTripAndValidateErrors() {
+        val game = FollowedWorkshopGame(
+            id = "294100",
+            userId = "backup_src",
+            appId = 294100,
+            gameName = "RimWorld",
+            developer = "Ludeon Studios",
+            headerImageUrl = "https://example.com/rimworld.jpg"
+        )
+        val watch = WatchlistItem(
+            id = "cyberpunk",
+            userId = "backup_src",
+            gameTitle = "Cyberpunk 2077",
+            targetPriceEur = 21.50,
+            preferredCurrency = "EUR"
+        )
+        store.saveFollowedGames("backup_src", listOf(game))
+        store.saveWatchlist("backup_src", listOf(watch))
+        store.setNewModNotificationsEnabled("backup_src", false)
+        store.setCheckIntervalHours("backup_src", 6L)
+        store.setNotifyNewModsEnabled("backup_src", false)
+        store.setNotifyModUpdatesEnabled("backup_src", true)
+        store.setQuietHoursEnabled("backup_src", true)
+        store.setQuietHoursStart("backup_src", 21)
+        store.setQuietHoursEnd("backup_src", 9)
+        store.setPreferredCurrency("backup_src", com.example.model.CurrencyMode.EUR)
+        store.setAlwaysOpenModsInSteamApp("backup_src", false)
+
+        val backupJson = store.exportBackupJson("backup_src")
+        assertTrue(backupJson.contains("RimWorld"))
+        assertTrue(backupJson.contains("Cyberpunk 2077"))
+
+        // Invalid inputs fail safely without crashing
+        val emptyResult = store.importBackupJson("backup_dst", "   ")
+        assertFalse(emptyResult.success)
+        assertNotNull(emptyResult.errorMessage)
+
+        val malformedResult = store.importBackupJson("backup_dst", "{not-json")
+        assertFalse(malformedResult.success)
+
+        val unrelatedJsonResult = store.importBackupJson("backup_dst", """{"hello":"world"}""")
+        assertFalse(unrelatedJsonResult.success)
+
+        // Valid import restores games, watchlist, and all notification/display preferences
+        val okResult = store.importBackupJson("backup_dst", backupJson)
+        assertTrue(okResult.success)
+        assertEquals(1, okResult.restoredGamesCount)
+        assertEquals(1, okResult.restoredWatchlistCount)
+        assertTrue(okResult.restoredPreferences)
+
+        val dstSnapshot = store.loadSnapshot("backup_dst")
+        assertEquals(1, dstSnapshot.followedGames.size)
+        assertEquals(294100, dstSnapshot.followedGames.first().appId)
+
+        val dstWatchlist = store.loadWatchlist("backup_dst")
+        assertEquals(1, dstWatchlist.size)
+        assertEquals(21.50, dstWatchlist.first().targetPriceEur, 0.001)
+
+        assertFalse(store.isNewModNotificationsEnabled("backup_dst"))
+        assertEquals(6L, store.getCheckIntervalHours("backup_dst"))
+        assertFalse(store.isNotifyNewModsEnabled("backup_dst"))
+        assertTrue(store.isNotifyModUpdatesEnabled("backup_dst"))
+        assertTrue(store.isQuietHoursEnabled("backup_dst"))
+        assertEquals(21, store.getQuietHoursStart("backup_dst"))
+        assertEquals(9, store.getQuietHoursEnd("backup_dst"))
+        assertEquals(com.example.model.CurrencyMode.EUR, store.getPreferredCurrency("backup_dst"))
+        assertFalse(store.isAlwaysOpenModsInSteamApp("backup_dst"))
+    }
 }
-
-

@@ -11,6 +11,7 @@ import com.example.model.WorkshopSortOrder
 import com.example.notifications.NewModNotificationItem
 import com.example.notifications.WorkshopNotificationHelper
 import kotlinx.coroutines.CancellationException
+import java.util.Calendar
 
 class WorkshopCheckWorker(
     appContext: Context,
@@ -38,12 +39,29 @@ class WorkshopCheckWorker(
             repository: SteamWorkshopRepository,
             runAttemptCount: Int = 0,
             nowEpochSec: Long = System.currentTimeMillis() / 1000L,
+            currentHourProvider: () -> Int = { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) },
             notifyHandler: (List<NewModNotificationItem>) -> Boolean = { items ->
                 WorkshopNotificationHelper.postNewModsNotifications(context, items)
             }
         ): Result {
             val userKey = localStore.getActiveUserId()
             if (!localStore.isNewModNotificationsEnabled(userKey)) {
+                return Result.success()
+            }
+
+            if (localStore.isQuietHoursEnabled(userKey)) {
+                val currentHour = currentHourProvider()
+                val quietStart = localStore.getQuietHoursStart(userKey)
+                val quietEnd = localStore.getQuietHoursEnd(userKey)
+                if (WorkshopLocalStore.isHourInQuietWindow(currentHour, quietStart, quietEnd)) {
+                    // Defer notification checks until the next run outside quiet hours so baselines remain intact.
+                    return Result.success()
+                }
+            }
+
+            val notifyNewMods = localStore.isNotifyNewModsEnabled(userKey)
+            val notifyModUpdates = localStore.isNotifyModUpdatesEnabled(userKey)
+            if (!notifyNewMods && !notifyModUpdates) {
                 return Result.success()
             }
 
@@ -58,7 +76,8 @@ class WorkshopCheckWorker(
             var networkFailures = 0
             var totalRequests = 0
 
-            for (game in followedGames) {
+            if (notifyNewMods) {
+                for (game in followedGames) {
                 totalRequests++
                 val mods = try {
                     repository.fetchWorkshopMods(
@@ -115,13 +134,14 @@ class WorkshopCheckWorker(
                     )
                     localStore.saveLastNotifiedEpochSec(userKey, game.appId, updatedMaxTs)
                     localStore.saveLastNotifiedModIds(userKey, game.appId, latestBatchIds + lastNotifiedIds)
-                } else if (maxCreatedInBatch > lastNotifiedTimestamp) {
-                    localStore.saveLastNotifiedEpochSec(userKey, game.appId, maxCreatedInBatch)
-                    localStore.saveLastNotifiedModIds(userKey, game.appId, latestBatchIds + lastNotifiedIds)
+                    } else if (maxCreatedInBatch > lastNotifiedTimestamp) {
+                        localStore.saveLastNotifiedEpochSec(userKey, game.appId, maxCreatedInBatch)
+                        localStore.saveLastNotifiedModIds(userKey, game.appId, latestBatchIds + lastNotifiedIds)
+                    }
                 }
             }
 
-            if (followedMods.isNotEmpty()) {
+            if (notifyModUpdates && followedMods.isNotEmpty()) {
                 totalRequests++
                 val modIds = followedMods.map { it.publishedFileId }.distinct().take(100)
                 val detailsMap = try {

@@ -42,6 +42,7 @@ class PulseDealsUiTest {
     @Test
     fun topBar_guestModeShowsTitleCurrencyAndSingleLoginButton_withoutVersionBadgeOrDuplicateLogout() {
         var loginClicked = false
+        var settingsClicked = false
         var selectedCurrency = CurrencyMode.SEK
 
         composeTestRule.setContent {
@@ -55,6 +56,7 @@ class PulseDealsUiTest {
                     onSelectCurrency = { selectedCurrency = it },
                     onNavigateToLogin = { loginClicked = true },
                     onOpenReleases = {},
+                    onOpenSettings = { settingsClicked = true },
                     onSignOut = {}
                 )
             }
@@ -65,6 +67,7 @@ class PulseDealsUiTest {
         composeTestRule.onNodeWithTag("currency_sek").assertIsDisplayed()
         composeTestRule.onNodeWithTag("currency_eur").assertIsDisplayed()
         composeTestRule.onNodeWithTag("guest_login_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_button").assertIsDisplayed()
 
         composeTestRule.onNodeWithText("v1.0.0", substring = true).assertDoesNotExist()
         composeTestRule.onNodeWithTag("sign_out_button").assertDoesNotExist()
@@ -72,6 +75,9 @@ class PulseDealsUiTest {
 
         composeTestRule.onNodeWithTag("guest_login_button").performClick()
         assertTrue(loginClicked)
+
+        composeTestRule.onNodeWithTag("settings_button").performClick()
+        assertTrue(settingsClicked)
     }
 
     @Test

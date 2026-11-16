@@ -390,4 +390,145 @@ class WorkshopCheckWorkerTest {
         assertEquals(ListenableWorker.Result.success(), r3)
         assertEquals(1, batches.size)
     }
+
+    @Test
+    fun checkAndNotify_defersDuringQuietHours_andRespectsPerTypeToggles() = runBlocking {
+        localStore.setActiveUserId("user_quiet")
+        localStore.setNewModNotificationsEnabled("user_quiet", true)
+        localStore.setQuietHoursEnabled("user_quiet", true)
+        localStore.setQuietHoursStart("user_quiet", 22)
+        localStore.setQuietHoursEnd("user_quiet", 8)
+
+        localStore.saveFollowedGames(
+            "user_quiet",
+            listOf(
+                FollowedWorkshopGame(
+                    id = "1643320",
+                    userId = "user_quiet",
+                    appId = 1643320,
+                    gameName = "S.T.A.L.K.E.R. 2"
+                )
+            )
+        )
+        localStore.saveLastNotifiedEpochSec("user_quiet", 1643320, 1_765_000_000L)
+
+        localStore.saveFollowedMods(
+            "user_quiet",
+            listOf(
+                com.example.model.FollowedWorkshopMod(
+                    id = "3370001",
+                    userId = "user_quiet",
+                    publishedFileId = "3370001",
+                    appId = 294100,
+                    gameName = "RimWorld",
+                    title = "HugLib",
+                    createdEpochSec = 1_760_000_000L,
+                    updatedEpochSec = 1_764_000_000L,
+                    source = com.example.model.WorkshopFollowSource.STEAM_SYNC
+                )
+            )
+        )
+        localStore.saveLastNotifiedModUpdatedMap("user_quiet", mapOf("3370001" to 1_764_000_000L))
+
+        val browseHtml = """
+            <div class="workshopBrowseItems">
+              <div class="workshopItem" data-publishedfileid="2002" data-time-created="1765008000">
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=2002">
+                  <div class="workshopItemTitle">Quiet Window New Mod</div>
+                </a>
+              </div>
+            </div>
+        """.trimIndent()
+        val apiJson = """
+            {
+              "response": {
+                "publishedfiledetails": [
+                  {
+                    "publishedfileid": "2002",
+                    "result": 1,
+                    "consumer_app_id": 1643320,
+                    "title": "Quiet Window New Mod",
+                    "time_created": 1765008000,
+                    "time_updated": 1765008000
+                  },
+                  {
+                    "publishedfileid": "3370001",
+                    "result": 1,
+                    "consumer_app_id": 294100,
+                    "title": "HugLib",
+                    "time_created": 1760000000,
+                    "time_updated": 1765200000
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val fakeClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val isApi = req.url.toString().contains("GetPublishedFileDetails")
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(
+                        (if (isApi) apiJson else browseHtml)
+                            .toResponseBody((if (isApi) "application/json" else "text/html").toMediaType())
+                    )
+                    .build()
+            }
+            .build()
+
+        val repository = SteamWorkshopRepository(httpClient = fakeClient)
+        val batches = mutableListOf<List<NewModNotificationItem>>()
+
+        // 1. Inside quiet hours (23:00 in 22:00..08:00): nothing posted and baselines preserved
+        val quietResult = WorkshopCheckWorker.checkAndNotify(
+            context = app,
+            localStore = localStore,
+            repository = repository,
+            nowEpochSec = 1_765_205_000L,
+            currentHourProvider = { 23 },
+            notifyHandler = { batches.add(it); true }
+        )
+        assertEquals(ListenableWorker.Result.success(), quietResult)
+        assertTrue(batches.isEmpty())
+        assertEquals(1_765_000_000L, localStore.getLastNotifiedEpochSec("user_quiet", 1643320))
+        assertEquals(1_764_000_000L, localStore.loadLastNotifiedModUpdatedMap("user_quiet")["3370001"])
+
+        // 2. Outside quiet hours (09:00), with notifyNewMods disabled -> only subscribed update fires
+        localStore.setNotifyNewModsEnabled("user_quiet", false)
+        localStore.setNotifyModUpdatesEnabled("user_quiet", true)
+        val awakeUpdateOnly = WorkshopCheckWorker.checkAndNotify(
+            context = app,
+            localStore = localStore,
+            repository = repository,
+            nowEpochSec = 1_765_210_000L,
+            currentHourProvider = { 9 },
+            notifyHandler = { batches.add(it); true }
+        )
+        assertEquals(ListenableWorker.Result.success(), awakeUpdateOnly)
+        assertEquals(1, batches.size)
+        assertEquals(1, batches[0].size)
+        assertTrue(batches[0][0].isUpdate)
+        assertEquals("HugLib", batches[0][0].modTitle)
+
+        // 3. Re-enable notifyNewMods outside quiet hours -> deferred new mod fires!
+        localStore.setNotifyNewModsEnabled("user_quiet", true)
+        val awakeNewMod = WorkshopCheckWorker.checkAndNotify(
+            context = app,
+            localStore = localStore,
+            repository = repository,
+            nowEpochSec = 1_765_215_000L,
+            currentHourProvider = { 10 },
+            notifyHandler = { batches.add(it); true }
+        )
+        assertEquals(ListenableWorker.Result.success(), awakeNewMod)
+        assertEquals(2, batches.size)
+        assertEquals(1, batches[1].size)
+        assertFalse(batches[1][0].isUpdate)
+        assertEquals("Quiet Window New Mod", batches[1][0].modTitle)
+    }
 }

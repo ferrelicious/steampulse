@@ -2,6 +2,7 @@ package com.example.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.model.CurrencyMode
 import com.example.model.FollowedWorkshopGame
 import com.example.model.FollowedWorkshopMod
 import com.example.model.SteamWorkshopSyncProfile
@@ -10,6 +11,14 @@ import com.example.model.WorkshopFollowSource
 import com.google.firebase.Timestamp
 import org.json.JSONArray
 import org.json.JSONObject
+
+data class BackupRestoreResult(
+    val success: Boolean,
+    val restoredGamesCount: Int = 0,
+    val restoredWatchlistCount: Int = 0,
+    val restoredPreferences: Boolean = false,
+    val errorMessage: String? = null
+)
 
 data class WorkshopLocalSnapshot(
     val followedGames: List<FollowedWorkshopGame> = emptyList(),
@@ -168,6 +177,35 @@ class WorkshopLocalStore(
         if (userWatchlist.isEmpty() && guestWatchlist.isNotEmpty()) {
             saveWatchlist(newUserId, guestWatchlist.map { it.copy(userId = newUserId) })
         }
+        copyBoolPrefIfMissing(newUserId, "guest", "notify_new_mods_enabled")
+        copyBoolPrefIfMissing(newUserId, "guest", "notify_mod_updates_enabled")
+        copyBoolPrefIfMissing(newUserId, "guest", "quiet_hours_enabled")
+        copyIntPrefIfMissing(newUserId, "guest", "quiet_hours_start")
+        copyIntPrefIfMissing(newUserId, "guest", "quiet_hours_end")
+        copyBoolPrefIfMissing(newUserId, "guest", "always_open_mods_in_steam_app")
+        val currencyKey = "${keyPrefix(newUserId)}preferred_currency"
+        if (!prefs.contains(currencyKey)) {
+            val guestCurrency = prefs.getString("${keyPrefix("guest")}preferred_currency", null)
+            if (!guestCurrency.isNullOrBlank()) {
+                prefs.edit().putString(currencyKey, guestCurrency).apply()
+            }
+        }
+    }
+
+    private fun copyBoolPrefIfMissing(targetUid: String, sourceUid: String, suffix: String) {
+        val targetKey = "${keyPrefix(targetUid)}$suffix"
+        val sourceKey = "${keyPrefix(sourceUid)}$suffix"
+        if (!prefs.contains(targetKey) && prefs.contains(sourceKey)) {
+            prefs.edit().putBoolean(targetKey, prefs.getBoolean(sourceKey, false)).apply()
+        }
+    }
+
+    private fun copyIntPrefIfMissing(targetUid: String, sourceUid: String, suffix: String) {
+        val targetKey = "${keyPrefix(targetUid)}$suffix"
+        val sourceKey = "${keyPrefix(sourceUid)}$suffix"
+        if (!prefs.contains(targetKey) && prefs.contains(sourceKey)) {
+            prefs.edit().putInt(targetKey, prefs.getInt(sourceKey, 0)).apply()
+        }
     }
 
     fun getActiveUserId(): String {
@@ -201,6 +239,80 @@ class WorkshopLocalStore(
         val sanitized = if (hours in SUPPORTED_CHECK_INTERVAL_HOURS) hours else DEFAULT_CHECK_INTERVAL_HOURS
         prefs.edit()
             .putLong("${keyPrefix(userId)}check_interval_hours", sanitized)
+            .apply()
+    }
+
+    fun isNotifyNewModsEnabled(userId: String): Boolean {
+        return prefs.getBoolean("${keyPrefix(userId)}notify_new_mods_enabled", true)
+    }
+
+    fun setNotifyNewModsEnabled(userId: String, enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("${keyPrefix(userId)}notify_new_mods_enabled", enabled)
+            .apply()
+    }
+
+    fun isNotifyModUpdatesEnabled(userId: String): Boolean {
+        return prefs.getBoolean("${keyPrefix(userId)}notify_mod_updates_enabled", true)
+    }
+
+    fun setNotifyModUpdatesEnabled(userId: String, enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("${keyPrefix(userId)}notify_mod_updates_enabled", enabled)
+            .apply()
+    }
+
+    fun isQuietHoursEnabled(userId: String): Boolean {
+        return prefs.getBoolean("${keyPrefix(userId)}quiet_hours_enabled", false)
+    }
+
+    fun setQuietHoursEnabled(userId: String, enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("${keyPrefix(userId)}quiet_hours_enabled", enabled)
+            .apply()
+    }
+
+    fun getQuietHoursStart(userId: String): Int {
+        return prefs.getInt("${keyPrefix(userId)}quiet_hours_start", DEFAULT_QUIET_START_HOUR)
+            .coerceIn(0, 23)
+    }
+
+    fun setQuietHoursStart(userId: String, hour: Int) {
+        prefs.edit()
+            .putInt("${keyPrefix(userId)}quiet_hours_start", hour.coerceIn(0, 23))
+            .apply()
+    }
+
+    fun getQuietHoursEnd(userId: String): Int {
+        return prefs.getInt("${keyPrefix(userId)}quiet_hours_end", DEFAULT_QUIET_END_HOUR)
+            .coerceIn(0, 23)
+    }
+
+    fun setQuietHoursEnd(userId: String, hour: Int) {
+        prefs.edit()
+            .putInt("${keyPrefix(userId)}quiet_hours_end", hour.coerceIn(0, 23))
+            .apply()
+    }
+
+    fun getPreferredCurrency(userId: String): CurrencyMode {
+        val code = prefs.getString("${keyPrefix(userId)}preferred_currency", CurrencyMode.SEK.code)
+        return CurrencyMode.entries.firstOrNull { it.code.equals(code, ignoreCase = true) }
+            ?: CurrencyMode.SEK
+    }
+
+    fun setPreferredCurrency(userId: String, currency: CurrencyMode) {
+        prefs.edit()
+            .putString("${keyPrefix(userId)}preferred_currency", currency.code)
+            .apply()
+    }
+
+    fun isAlwaysOpenModsInSteamApp(userId: String): Boolean {
+        return prefs.getBoolean("${keyPrefix(userId)}always_open_mods_in_steam_app", true)
+    }
+
+    fun setAlwaysOpenModsInSteamApp(userId: String, enabled: Boolean) {
+        prefs.edit()
+            .putBoolean("${keyPrefix(userId)}always_open_mods_in_steam_app", enabled)
             .apply()
     }
 
@@ -491,6 +603,198 @@ class WorkshopLocalStore(
         return updated
     }
 
+    fun exportBackupJson(userId: String): String {
+        val snapshot = loadSnapshot(userId)
+        val watchlist = loadWatchlist(userId)
+
+        val gamesArray = JSONArray()
+        snapshot.followedGames.forEach { game ->
+            gamesArray.put(
+                JSONObject().apply {
+                    put("appId", game.appId)
+                    put("gameName", game.gameName)
+                    put("developer", game.developer)
+                    put("headerImageUrl", game.headerImageUrl)
+                }
+            )
+        }
+
+        val watchlistArray = JSONArray()
+        watchlist.forEach { item ->
+            watchlistArray.put(
+                JSONObject().apply {
+                    put("id", item.id)
+                    put("gameTitle", item.gameTitle)
+                    put("targetPriceEur", item.targetPriceEur)
+                    put("preferredCurrency", item.preferredCurrency)
+                }
+            )
+        }
+
+        val prefsObj = JSONObject().apply {
+            put("newModNotificationsEnabled", isNewModNotificationsEnabled(userId))
+            put("checkIntervalHours", getCheckIntervalHours(userId))
+            put("notifyNewMods", isNotifyNewModsEnabled(userId))
+            put("notifyModUpdates", isNotifyModUpdatesEnabled(userId))
+            put("quietHoursEnabled", isQuietHoursEnabled(userId))
+            put("quietHoursStart", getQuietHoursStart(userId))
+            put("quietHoursEnd", getQuietHoursEnd(userId))
+            put("preferredCurrency", getPreferredCurrency(userId).code)
+            put("alwaysOpenModsInSteamApp", isAlwaysOpenModsInSteamApp(userId))
+        }
+
+        return JSONObject().apply {
+            put("app", BACKUP_APP_MARKER)
+            put("version", BACKUP_FORMAT_VERSION)
+            put("exportedAtEpochSec", System.currentTimeMillis() / 1000L)
+            put("followedGames", gamesArray)
+            put("watchlistItems", watchlistArray)
+            put("notificationPreferences", prefsObj)
+        }.toString()
+    }
+
+    fun importBackupJson(userId: String, rawJson: String): BackupRestoreResult {
+        val trimmed = rawJson.trim()
+        if (trimmed.isBlank()) {
+            return BackupRestoreResult(
+                success = false,
+                errorMessage = "Urklipp är tomt."
+            )
+        }
+
+        val root = try {
+            JSONObject(trimmed)
+        } catch (_: Exception) {
+            return BackupRestoreResult(
+                success = false,
+                errorMessage = "Ogiltigt JSON-format i urklipp."
+            )
+        }
+
+        val hasKnownSection = root.has("followedGames") ||
+            root.has("watchlistItems") ||
+            root.has("notificationPreferences")
+        if (!hasKnownSection) {
+            return BackupRestoreResult(
+                success = false,
+                errorMessage = "Kunde inte hitta giltig SteamPulse-backup i urklipp."
+            )
+        }
+
+        val nowTs = Timestamp.now()
+        var restoredGamesCount = 0
+        if (root.has("followedGames")) {
+            val arr = root.optJSONArray("followedGames")
+                ?: return BackupRestoreResult(
+                    success = false,
+                    errorMessage = "Ogiltig lista för följda spel i backup."
+                )
+            val parsedGames = buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val appId = obj.optInt("appId", 0)
+                    if (appId <= 0) continue
+                    add(
+                        FollowedWorkshopGame(
+                            id = appId.toString(),
+                            userId = userId,
+                            appId = appId,
+                            gameName = obj.optString("gameName", "Steam App #$appId"),
+                            developer = obj.optString("developer", ""),
+                            headerImageUrl = obj.optString("headerImageUrl", ""),
+                            createdAt = nowTs,
+                            updatedAt = nowTs
+                        )
+                    )
+                }
+            }.distinctBy { it.appId }
+            val existingGames = loadSnapshot(userId).followedGames
+            val mergedGames = (parsedGames + existingGames).distinctBy { it.appId }
+            saveFollowedGames(userId, mergedGames)
+            restoredGamesCount = parsedGames.size
+        }
+
+        var restoredWatchlistCount = 0
+        if (root.has("watchlistItems")) {
+            val arr = root.optJSONArray("watchlistItems")
+                ?: return BackupRestoreResult(
+                    success = false,
+                    errorMessage = "Ogiltig bevakningslista i backup."
+                )
+            val parsedItems = buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id", "").trim()
+                    if (id.isBlank()) continue
+                    val targetPrice = obj.optDouble("targetPriceEur", 0.0)
+                        .takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+                    val currency = obj.optString("preferredCurrency", "SEK")
+                        .takeIf { it == "SEK" || it == "EUR" } ?: "SEK"
+                    add(
+                        WatchlistItem(
+                            id = id,
+                            userId = userId,
+                            gameTitle = obj.optString("gameTitle", id),
+                            targetPriceEur = targetPrice,
+                            preferredCurrency = currency,
+                            createdAt = nowTs,
+                            updatedAt = nowTs
+                        )
+                    )
+                }
+            }.distinctBy { it.id }
+            val existingWatchlist = loadWatchlist(userId)
+            val mergedWatchlist = (parsedItems + existingWatchlist).distinctBy { it.id }
+            saveWatchlist(userId, mergedWatchlist)
+            restoredWatchlistCount = parsedItems.size
+        }
+
+        var restoredPreferences = false
+        val prefsObj = root.optJSONObject("notificationPreferences")
+        if (prefsObj != null) {
+            if (prefsObj.has("newModNotificationsEnabled")) {
+                setNewModNotificationsEnabled(userId, prefsObj.optBoolean("newModNotificationsEnabled", true))
+            }
+            if (prefsObj.has("checkIntervalHours")) {
+                setCheckIntervalHours(userId, prefsObj.optLong("checkIntervalHours", DEFAULT_CHECK_INTERVAL_HOURS))
+            }
+            if (prefsObj.has("notifyNewMods")) {
+                setNotifyNewModsEnabled(userId, prefsObj.optBoolean("notifyNewMods", true))
+            }
+            if (prefsObj.has("notifyModUpdates")) {
+                setNotifyModUpdatesEnabled(userId, prefsObj.optBoolean("notifyModUpdates", true))
+            }
+            if (prefsObj.has("quietHoursEnabled")) {
+                setQuietHoursEnabled(userId, prefsObj.optBoolean("quietHoursEnabled", false))
+            }
+            if (prefsObj.has("quietHoursStart")) {
+                setQuietHoursStart(userId, prefsObj.optInt("quietHoursStart", DEFAULT_QUIET_START_HOUR))
+            }
+            if (prefsObj.has("quietHoursEnd")) {
+                setQuietHoursEnd(userId, prefsObj.optInt("quietHoursEnd", DEFAULT_QUIET_END_HOUR))
+            }
+            if (prefsObj.has("preferredCurrency")) {
+                val mode = CurrencyMode.entries.firstOrNull {
+                    it.code.equals(prefsObj.optString("preferredCurrency"), ignoreCase = true)
+                }
+                if (mode != null) {
+                    setPreferredCurrency(userId, mode)
+                }
+            }
+            if (prefsObj.has("alwaysOpenModsInSteamApp")) {
+                setAlwaysOpenModsInSteamApp(userId, prefsObj.optBoolean("alwaysOpenModsInSteamApp", true))
+            }
+            restoredPreferences = true
+        }
+
+        return BackupRestoreResult(
+            success = true,
+            restoredGamesCount = restoredGamesCount,
+            restoredWatchlistCount = restoredWatchlistCount,
+            restoredPreferences = restoredPreferences
+        )
+    }
+
     private fun keyPrefix(userId: String): String {
         val safeUid = userId.trim().ifBlank { "default" }
         return "workshop_${safeUid}_"
@@ -503,6 +807,21 @@ class WorkshopLocalStore(
         private const val MAX_STORED_NOTIFIED_IDS = 80
         const val DEFAULT_CHECK_INTERVAL_HOURS = 2L
         val SUPPORTED_CHECK_INTERVAL_HOURS = listOf(1L, 2L, 6L, 12L)
+        const val DEFAULT_QUIET_START_HOUR = 22
+        const val DEFAULT_QUIET_END_HOUR = 8
         private const val RECENT_UPDATE_WINDOW_SECONDS = 48L * 3600L
+        private const val BACKUP_APP_MARKER = "SteamPulse"
+        private const val BACKUP_FORMAT_VERSION = 1
+
+        fun isHourInQuietWindow(currentHour: Int, startHour: Int, endHour: Int): Boolean {
+            val h = currentHour.coerceIn(0, 23)
+            val start = startHour.coerceIn(0, 23)
+            val end = endHour.coerceIn(0, 23)
+            return when {
+                start == end -> false
+                start < end -> h in start until end
+                else -> h >= start || h < end
+            }
+        }
     }
 }
