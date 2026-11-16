@@ -616,7 +616,8 @@ private fun AuthenticatedAppShell(
                                     onOpenSteamWebViewLogin = workshopViewModel::openSteamWebViewLoginDialog,
                                     onDismissSteamWebViewLogin = workshopViewModel::dismissSteamWebViewLoginDialog,
                                     onSteamWebViewAuthenticated = workshopViewModel::onSteamWebViewAuthenticated,
-                                    onLogoutSteamSession = workshopViewModel::logoutSteamSession
+                                    onLogoutSteamSession = workshopViewModel::logoutSteamSession,
+                                    onWorkshopVisited = workshopViewModel::markWorkshopVisited
                                 )
 
                                 AppTab.WATCHLIST -> WatchlistScreen(

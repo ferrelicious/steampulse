@@ -70,6 +70,7 @@ class WorkshopLocalStore(
                     put("previewUrl", mod.previewUrl)
                     put("itemUrl", mod.itemUrl)
                     put("source", mod.source)
+                    put("createdEpochSec", mod.createdEpochSec)
                     put("updatedEpochSec", mod.updatedEpochSec)
                     put("subscriptions", mod.subscriptions)
                     put("updatedSec", mod.updatedAt?.seconds ?: (System.currentTimeMillis() / 1000L))
@@ -134,6 +135,38 @@ class WorkshopLocalStore(
         if (userSnapshot.steamSessionCookie.isEmpty() && guestSnapshot.steamSessionCookie.isNotEmpty()) {
             saveSteamSession(newUserId, guestSnapshot.steamSessionSteamId64, guestSnapshot.steamSessionCookie)
         }
+        if (getWorkshopLastVisitEpochSec(newUserId) == 0L) {
+            val guestVisit = getWorkshopLastVisitEpochSec("guest")
+            if (guestVisit > 0L) {
+                saveWorkshopLastVisitEpochSec(newUserId, guestVisit)
+            }
+        }
+    }
+
+    fun getWorkshopLastVisitEpochSec(userId: String): Long {
+        return prefs.getLong("${keyPrefix(userId)}last_workshop_visit_sec", 0L).coerceAtLeast(0L)
+    }
+
+    fun saveWorkshopLastVisitEpochSec(userId: String, epochSec: Long) {
+        if (epochSec <= 0L) return
+        prefs.edit().putLong("${keyPrefix(userId)}last_workshop_visit_sec", epochSec).apply()
+    }
+
+    fun getGameLastVisitEpochSec(userId: String, appId: Int): Long {
+        if (appId <= 0) return 0L
+        return prefs.getLong("${keyPrefix(userId)}last_game_visit_$appId", 0L).coerceAtLeast(0L)
+    }
+
+    fun saveGameLastVisitEpochSec(userId: String, appId: Int, epochSec: Long) {
+        if (appId <= 0 || epochSec <= 0L) return
+        prefs.edit().putLong("${keyPrefix(userId)}last_game_visit_$appId", epochSec).apply()
+    }
+
+    fun loadGameLastVisitMap(userId: String, appIds: List<Int>): Map<Int, Long> {
+        val overall = getWorkshopLastVisitEpochSec(userId)
+        return appIds.distinct().associateWith { appId ->
+            getGameLastVisitEpochSec(userId, appId).takeIf { it > 0L } ?: overall
+        }
     }
 
     private fun parseFollowedGames(raw: String): List<FollowedWorkshopGame> {
@@ -185,6 +218,7 @@ class WorkshopLocalStore(
                             previewUrl = obj.optString("previewUrl", ""),
                             itemUrl = obj.optString("itemUrl", "https://steamcommunity.com/sharedfiles/filedetails/?id=$id"),
                             source = obj.optString("source", WorkshopFollowSource.BOOKMARK),
+                            createdEpochSec = obj.optLong("createdEpochSec", 0L),
                             updatedEpochSec = obj.optLong("updatedEpochSec", 0L),
                             subscriptions = obj.optLong("subscriptions", 0L),
                             createdAt = ts,

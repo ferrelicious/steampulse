@@ -1,0 +1,144 @@
+package com.example.util
+
+import android.app.Application
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.pm.PackageInfo
+import androidx.test.core.app.ApplicationProvider
+import com.example.model.FollowedWorkshopMod
+import com.example.model.WorkshopModItem
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
+class WorkshopModelsAndDeepLinkTest {
+
+    @Test
+    fun isNewMod_evaluates48HourWindowAndPreviousVisitCorrectly() {
+        val now = 1_765_000_000L
+        val recentWithin48h = WorkshopModItem(
+            publishedFileId = "1",
+            appId = 1643320,
+            title = "Recent Mod",
+            author = "Author",
+            previewUrl = "",
+            itemUrl = "",
+            createdEpochSec = now - (12L * 3600L)
+        )
+        val olderThan48hAfterLastVisit = WorkshopModItem(
+            publishedFileId = "2",
+            appId = 1643320,
+            title = "Post-Visit Mod",
+            author = "Author",
+            previewUrl = "",
+            itemUrl = "",
+            createdEpochSec = now - (72L * 3600L)
+        )
+        val olderThan48hBeforeLastVisit = WorkshopModItem(
+            publishedFileId = "3",
+            appId = 1643320,
+            title = "Old Mod",
+            author = "Author",
+            previewUrl = "",
+            itemUrl = "",
+            createdEpochSec = now - (120L * 3600L)
+        )
+        val missingTimestamp = WorkshopModItem(
+            publishedFileId = "4",
+            appId = 1643320,
+            title = "No Timestamp",
+            author = "Author",
+            previewUrl = "",
+            itemUrl = "",
+            createdEpochSec = null
+        )
+
+        val previousVisit = now - (96L * 3600L)
+
+        // First-ever visit (previousVisit = 0L): only mods within 48h are NY
+        assertTrue(recentWithin48h.isNewMod(previousVisitEpochSec = 0L, nowEpochSec = now))
+        assertFalse(olderThan48hAfterLastVisit.isNewMod(previousVisitEpochSec = 0L, nowEpochSec = now))
+        assertFalse(olderThan48hBeforeLastVisit.isNewMod(previousVisitEpochSec = 0L, nowEpochSec = now))
+
+        // Subsequent visit: within 48h OR created after previous visit
+        assertTrue(recentWithin48h.isNewMod(previousVisitEpochSec = previousVisit, nowEpochSec = now))
+        assertTrue(olderThan48hAfterLastVisit.isNewMod(previousVisitEpochSec = previousVisit, nowEpochSec = now))
+        assertFalse(olderThan48hBeforeLastVisit.isNewMod(previousVisitEpochSec = previousVisit, nowEpochSec = now))
+        assertFalse(missingTimestamp.isNewMod(previousVisitEpochSec = previousVisit, nowEpochSec = now))
+    }
+
+    @Test
+    fun followedWorkshopMod_toModItemPreservesCreatedEpochSec() {
+        val followed = FollowedWorkshopMod(
+            publishedFileId = "555666",
+            appId = 294100,
+            title = "RimHud",
+            createdEpochSec = 1_764_000_000L,
+            updatedEpochSec = 1_764_100_000L
+        )
+        val modItem = followed.toModItem()
+        assertEquals(1_764_000_000L, modItem.createdEpochSec)
+        assertEquals(1_764_100_000L, modItem.updatedEpochSec)
+    }
+
+    @Test
+    fun steamDeepLinkHelper_buildsSteamUriAndFallsBackToBrowserOnActivityNotFound() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        assertEquals(
+            "steam://url/CommunityFilePage/33991122",
+            SteamDeepLinkHelper.buildSteamAppUri(" 33991122 ").toString()
+        )
+        assertEquals(
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=33991122",
+            SteamDeepLinkHelper.buildWebFallbackUri("33991122", "").toString()
+        )
+
+        // When Steam package is NOT installed
+        assertFalse(SteamDeepLinkHelper.isSteamAppInstalled(app.packageManager))
+        val intentWithoutSteam = SteamDeepLinkHelper.buildSteamDeepLinkIntent(app, "33991122")
+        assertNull(intentWithoutSteam.`package`)
+
+        // When Steam package IS installed
+        val pkgInfo = PackageInfo().apply {
+            packageName = SteamDeepLinkHelper.STEAM_PACKAGE_NAME
+        }
+        shadowOf(app.packageManager).installPackage(pkgInfo)
+        assertTrue(SteamDeepLinkHelper.isSteamAppInstalled(app.packageManager))
+        val intentWithSteam = SteamDeepLinkHelper.buildSteamDeepLinkIntent(app, "33991122")
+        assertEquals(SteamDeepLinkHelper.STEAM_PACKAGE_NAME, intentWithSteam.`package`)
+
+        // Verify fallback to browser URL when Steam deep link throws ActivityNotFoundException
+        val startedIntents = mutableListOf<Intent>()
+        val recordingContext = object : ContextWrapper(app) {
+            override fun startActivity(intent: Intent) {
+                startedIntents.add(intent)
+                if (intent.data?.scheme == "steam") {
+                    throw ActivityNotFoundException("Steam app cannot handle intent")
+                }
+            }
+        }
+
+        val opened = SteamDeepLinkHelper.openWorkshopModInSteam(
+            context = recordingContext,
+            publishedFileId = "33991122",
+            itemUrl = ""
+        )
+        assertTrue(opened)
+        assertEquals(2, startedIntents.size)
+        assertEquals("steam://url/CommunityFilePage/33991122", startedIntents[0].dataString)
+        assertEquals(
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=33991122",
+            startedIntents[1].dataString
+        )
+    }
+}

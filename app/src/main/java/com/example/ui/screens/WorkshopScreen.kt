@@ -64,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -103,6 +104,7 @@ import com.example.ui.theme.SteamSurface
 import com.example.ui.theme.SteamTextMuted
 import com.example.ui.theme.SteamTextPrimary
 import com.example.ui.theme.SteamTextSecondary
+import com.example.util.SteamDeepLinkHelper
 import com.example.viewmodel.WorkshopScreenUiState
 import java.util.Locale
 
@@ -137,15 +139,27 @@ fun WorkshopScreen(
     onOpenSteamWebViewLogin: () -> Unit = {},
     onDismissSteamWebViewLogin: () -> Unit = {},
     onSteamWebViewAuthenticated: (String, String) -> Unit = { _, _ -> },
-    onLogoutSteamSession: () -> Unit = {}
+    onLogoutSteamSession: () -> Unit = {},
+    onWorkshopVisited: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        onWorkshopVisited()
+    }
+
     val openUrl: (String) -> Unit = { url ->
         if (url.isNotBlank()) {
             runCatching {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             }
         }
+    }
+    val openModInSteam: (WorkshopModItem) -> Unit = { mod ->
+        SteamDeepLinkHelper.openWorkshopModInSteam(
+            context = context,
+            publishedFileId = mod.publishedFileId,
+            itemUrl = mod.itemUrl
+        )
     }
 
     val selectedGame = uiState.selectedGame
@@ -177,6 +191,7 @@ fun WorkshopScreen(
                     onOpenModDetail = onOpenModDetail,
                     onToggleBookmarkMod = onToggleBookmarkMod,
                     onRemoveFollowedMod = onRemoveFollowedMod,
+                    onOpenModInSteam = openModInSteam,
                     onOpenSteamSyncDialog = onOpenSteamSyncDialog,
                     onLogoutSteamSession = onLogoutSteamSession
                 )
@@ -195,7 +210,8 @@ fun WorkshopScreen(
             onRefreshMods = onRefreshMods,
             onLoadMoreMods = onLoadMoreMods,
             onOpenModDetail = onOpenModDetail,
-            onToggleBookmarkMod = { mod -> onToggleBookmarkMod(mod, selectedGame.name) }
+            onToggleBookmarkMod = { mod -> onToggleBookmarkMod(mod, selectedGame.name) },
+            onOpenModInSteam = openModInSteam
         )
     }
 
@@ -203,6 +219,12 @@ fun WorkshopScreen(
     if (selectedMod != null) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val isBookmarked = uiState.bookmarkedModIds.contains(selectedMod.publishedFileId)
+        val detailPrevVisit = if (uiState.selectedGame != null) {
+            uiState.activeGamePreviousVisitEpochSec
+        } else {
+            uiState.followedGamesPreviousVisitEpochSec[selectedMod.appId]
+                ?: uiState.previousWorkshopVisitEpochSec
+        }
         ModalBottomSheet(
             onDismissRequest = onCloseModDetail,
             sheetState = sheetState,
@@ -213,10 +235,11 @@ fun WorkshopScreen(
                 mod = selectedMod,
                 isLoadingDetails = uiState.isModDetailLoading,
                 isBookmarked = isBookmarked,
+                isNew = selectedMod.isNewMod(detailPrevVisit),
                 onToggleBookmark = {
                     onToggleBookmarkMod(selectedMod, uiState.selectedGame?.name)
                 },
-                onOpenOnSteam = { openUrl(selectedMod.itemUrl) }
+                onOpenOnSteam = { openModInSteam(selectedMod) }
             )
         }
     }
@@ -935,7 +958,8 @@ private fun GameWorkshopDetailPage(
     onRefreshMods: () -> Unit,
     onLoadMoreMods: () -> Unit,
     onOpenModDetail: (WorkshopModItem) -> Unit,
-    onToggleBookmarkMod: (WorkshopModItem) -> Unit
+    onToggleBookmarkMod: (WorkshopModItem) -> Unit,
+    onOpenModInSteam: (WorkshopModItem) -> Unit
 ) {
     val context = LocalContext.current
     BackHandler(onBack = onBack)
@@ -1412,8 +1436,10 @@ private fun GameWorkshopDetailPage(
                                                 WorkshopModCard(
                                                     mod = mod,
                                                     isBookmarked = uiState.bookmarkedModIds.contains(mod.publishedFileId),
+                                                    isNew = mod.isNewMod(uiState.activeGamePreviousVisitEpochSec),
                                                     onClick = { onOpenModDetail(mod) },
-                                                    onToggleBookmark = { onToggleBookmarkMod(mod) }
+                                                    onToggleBookmark = { onToggleBookmarkMod(mod) },
+                                                    onOpenInSteam = { onOpenModInSteam(mod) }
                                                 )
                                             }
                                         }
@@ -1430,8 +1456,10 @@ private fun GameWorkshopDetailPage(
                                     WorkshopModCard(
                                         mod = mod,
                                         isBookmarked = uiState.bookmarkedModIds.contains(mod.publishedFileId),
+                                        isNew = mod.isNewMod(uiState.activeGamePreviousVisitEpochSec),
                                         onClick = { onOpenModDetail(mod) },
-                                        onToggleBookmark = { onToggleBookmarkMod(mod) }
+                                        onToggleBookmark = { onToggleBookmarkMod(mod) },
+                                        onOpenInSteam = { onOpenModInSteam(mod) }
                                     )
                                 }
                             }
@@ -1474,117 +1502,133 @@ private fun GameWorkshopDetailPage(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkshopModCard(
     mod: WorkshopModItem,
     isBookmarked: Boolean,
+    isNew: Boolean,
     onClick: () -> Unit,
-    onToggleBookmark: () -> Unit
+    onToggleBookmark: () -> Unit,
+    onOpenInSteam: () -> Unit
 ) {
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = SteamSurface),
-        border = BorderStroke(1.dp, SteamBorder),
+        border = BorderStroke(
+            1.dp,
+            if (isNew) SteamSale.copy(alpha = 0.45f) else SteamBorder
+        ),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("workshop_mod_${mod.publishedFileId}")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(78.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SteamCard)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (mod.previewUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = mod.previewUrl,
-                        contentDescription = mod.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Rounded.Extension,
-                        contentDescription = null,
-                        tint = SteamAccent,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .align(Alignment.Center)
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = mod.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = SteamTextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "av ${mod.author}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SteamTextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Box(
+                    modifier = Modifier
+                        .size(78.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SteamCard)
                 ) {
-                    mod.subscriptions?.let { subs ->
-                        Surface(
-                            color = SteamNeon.copy(alpha = 0.14f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    if (mod.previewUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = mod.previewUrl,
+                            contentDescription = mod.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Extension,
+                            contentDescription = null,
+                            tint = SteamAccent,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .align(Alignment.Center)
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = mod.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = SteamTextPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "av ${mod.author}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SteamTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (isNew) {
+                            ModNewBadgePill(
+                                modifier = Modifier.testTag("mod_new_badge_${mod.publishedFileId}")
+                            )
+                        }
+                        mod.subscriptions?.let { subs ->
+                            Surface(
+                                color = SteamNeon.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(6.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Group,
-                                    contentDescription = null,
-                                    tint = SteamNeon,
-                                    modifier = Modifier.size(12.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Group,
+                                        contentDescription = null,
+                                        tint = SteamNeon,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = formatCompactCount(subs),
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SteamNeon
+                                    )
+                                }
+                            }
+                        }
+
+                        mod.fileSizeBytes?.let { size ->
+                            if (size > 0L) {
                                 Text(
-                                    text = formatCompactCount(subs),
+                                    text = formatSizeMb(size),
                                     fontFamily = JetBrainsMonoFontFamily,
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SteamNeon
+                                    color = SteamTextSecondary
                                 )
                             }
                         }
-                    }
 
-                    mod.fileSizeBytes?.let { size ->
-                        if (size > 0L) {
-                            Text(
-                                text = formatSizeMb(size),
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontSize = 10.sp,
-                                color = SteamTextSecondary
-                            )
-                        }
-                    }
-
-                    mod.updatedEpochSec?.let { epoch ->
-                        if (epoch > 0L) {
+                        val displayEpoch = mod.createdEpochSec?.takeIf { it > 0L }
+                            ?: mod.updatedEpochSec?.takeIf { it > 0L }
+                        displayEpoch?.let { epoch ->
                             Text(
                                 text = formatWorkshopEpochDate(epoch),
                                 fontFamily = JetBrainsMonoFontFamily,
@@ -1594,21 +1638,87 @@ private fun WorkshopModCard(
                         }
                     }
                 }
+
+                IconButton(
+                    onClick = onToggleBookmark,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("bookmark_mod_${mod.publishedFileId}")
+                ) {
+                    Icon(
+                        imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        contentDescription = if (isBookmarked) "Ta bort bokmärke för ${mod.title}" else "Bokmärk ${mod.title}",
+                        tint = if (isBookmarked) SteamNeon else SteamTextSecondary
+                    )
+                }
             }
 
-            IconButton(
-                onClick = onToggleBookmark,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .testTag("bookmark_mod_${mod.publishedFileId}")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    contentDescription = if (isBookmarked) "Ta bort bokmärke för ${mod.title}" else "Bokmärk ${mod.title}",
-                    tint = if (isBookmarked) SteamNeon else SteamTextSecondary
+                OpenInSteamModButton(
+                    publishedFileId = mod.publishedFileId,
+                    onClick = onOpenInSteam
                 )
             }
         }
+    }
+}
+
+@Composable
+internal fun ModNewBadgePill(
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = SteamSale,
+        shape = RoundedCornerShape(6.dp),
+        modifier = modifier
+    ) {
+        Text(
+            text = "NY",
+            fontFamily = JetBrainsMonoFontFamily,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+            softWrap = false,
+            color = Color(0xFF020617),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+internal fun OpenInSteamModButton(
+    publishedFileId: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedButton(
+        onClick = onClick,
+        border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .testTag("open_in_steam_$publishedFileId")
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+            contentDescription = null,
+            tint = SteamAccent,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "Öppna i Steam",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = SteamAccent,
+            maxLines = 1,
+            softWrap = false
+        )
     }
 }
 
@@ -1618,6 +1728,7 @@ private fun WorkshopModDetailSheetContent(
     mod: WorkshopModItem,
     isLoadingDetails: Boolean,
     isBookmarked: Boolean,
+    isNew: Boolean,
     onToggleBookmark: () -> Unit,
     onOpenOnSteam: () -> Unit
 ) {
@@ -1646,11 +1757,22 @@ private fun WorkshopModDetailSheetContent(
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = mod.title,
-                style = MaterialTheme.typography.titleLarge,
-                color = SteamTextPrimary
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (isNew) {
+                    ModNewBadgePill(
+                        modifier = Modifier.testTag("sheet_mod_new_badge_${mod.publishedFileId}")
+                    )
+                }
+                Text(
+                    text = mod.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = SteamTextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
             Text(
                 text = "Skapare: ${mod.author} • Workshop ID ${mod.publishedFileId}",
                 fontFamily = JetBrainsMonoFontFamily,
@@ -1790,13 +1912,13 @@ private fun WorkshopModDetailSheetContent(
                 .testTag("open_mod_on_steam_button")
         ) {
             Icon(
-                imageVector = Icons.Rounded.ThumbUp,
+                imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "Öppna & Prenumerera på Steam",
+                text = "Öppna i Steam",
                 fontWeight = FontWeight.Bold
             )
         }

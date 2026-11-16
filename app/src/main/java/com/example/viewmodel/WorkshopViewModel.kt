@@ -60,7 +60,10 @@ data class WorkshopScreenUiState(
     val showSteamWebViewLoginDialog: Boolean = false,
     val steamProfileInput: String = "",
     val hasSteamSession: Boolean = false,
-    val steamSessionSteamId64: String = ""
+    val steamSessionSteamId64: String = "",
+    val previousWorkshopVisitEpochSec: Long = 0L,
+    val activeGamePreviousVisitEpochSec: Long = 0L,
+    val followedGamesPreviousVisitEpochSec: Map<Int, Long> = emptyMap()
 ) {
     val isShowingStoreSearch: Boolean
         get() = storeSearchResults != null
@@ -113,6 +116,8 @@ class WorkshopViewModel(
     private val removedModIds = mutableSetOf<String>()
     private var hasPendingLocalSyncProfile = false
     private var steamSessionCookie: String = ""
+    private var hasRecordedSessionVisit = false
+    private val recordedFollowedGameVisits = mutableSetOf<Int>()
 
     private var loadGamesJob: Job? = null
     private var searchStoreJob: Job? = null
@@ -132,19 +137,15 @@ class WorkshopViewModel(
 
     private fun hydrateFromLocalStore() {
         val store = localStore ?: return
-        val snapshot = store.loadSnapshot(storeUserKey())
+        val storeKey = storeUserKey()
+        val snapshot = store.loadSnapshot(storeKey)
+        val prevWorkshopVisit = store.getWorkshopLastVisitEpochSec(storeKey)
+        val followedPrevMap = store.loadGameLastVisitMap(storeKey, snapshot.followedGames.map { it.appId })
         steamSessionCookie = snapshot.steamSessionCookie
         val sessionId64 = snapshot.steamSessionSteamId64
             .ifBlank { SteamWorkshopRepository.extractSteamId64FromCookie(snapshot.steamSessionCookie).orEmpty() }
         val isSessionActive = snapshot.steamSessionCookie.isNotBlank() && sessionId64.isNotBlank()
 
-        if (snapshot.followedGames.isEmpty() &&
-            snapshot.followedMods.isEmpty() &&
-            snapshot.syncProfile == null &&
-            !isSessionActive
-        ) {
-            return
-        }
         _uiState.update { current ->
             val prefill = current.steamProfileInput.ifBlank {
                 snapshot.syncProfile?.profileInput.orEmpty()
@@ -157,10 +158,21 @@ class WorkshopViewModel(
                 syncProfile = snapshot.syncProfile,
                 steamProfileInput = prefill,
                 hasSteamSession = isSessionActive,
-                steamSessionSteamId64 = if (isSessionActive) sessionId64 else ""
+                steamSessionSteamId64 = if (isSessionActive) sessionId64 else "",
+                previousWorkshopVisitEpochSec = prevWorkshopVisit,
+                followedGamesPreviousVisitEpochSec = followedPrevMap
             )
         }
         lastFeedGameIds = snapshot.followedGames.map { it.appId }.toSet()
+    }
+
+    fun markWorkshopVisited() {
+        if (hasRecordedSessionVisit) return
+        hasRecordedSessionVisit = true
+        val store = localStore ?: return
+        val storeKey = storeUserKey()
+        val nowEpochSec = System.currentTimeMillis() / 1000L
+        store.saveWorkshopLastVisitEpochSec(storeKey, nowEpochSec)
     }
 
     private fun startObservingFollowedState() {
@@ -188,7 +200,23 @@ class WorkshopViewModel(
                             .sortedByDescending { it.updatedAt?.seconds ?: 0L }
                     }
 
-                    _uiState.update { it.copy(followedGames = mergedGames) }
+                    val existingVisitMap = _uiState.value.followedGamesPreviousVisitEpochSec
+                    val updatedVisitMap = existingVisitMap.toMutableMap()
+                    val store = localStore
+                    val overallPrev = _uiState.value.previousWorkshopVisitEpochSec
+                    mergedGames.forEach { game ->
+                        if (!updatedVisitMap.containsKey(game.appId)) {
+                            val saved = store?.getGameLastVisitEpochSec(storeKey, game.appId) ?: 0L
+                            updatedVisitMap[game.appId] = if (saved > 0L) saved else overallPrev
+                        }
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            followedGames = mergedGames,
+                            followedGamesPreviousVisitEpochSec = updatedVisitMap
+                        )
+                    }
                     localStore?.saveFollowedGames(storeKey, mergedGames)
 
                     val newIds = mergedGames.map { it.appId }.toSet()
@@ -209,12 +237,22 @@ class WorkshopViewModel(
                     removedModIds.retainAll(remoteIds)
 
                     val currentMods = _uiState.value.followedMods
+                    val currentById = currentMods.associateBy { it.publishedFileId }
                     val mergedMods = if (remoteMods.isEmpty() && currentMods.isNotEmpty() && removedModIds.isEmpty()) {
                         // Do not let an empty offline Firestore cache wipe locally synced/bookmarked mods.
                         currentMods
                     } else {
                         val keptPending = currentMods.filter { it.publishedFileId in pendingLocalModIds }
-                        val filteredRemote = remoteMods.filterNot { it.publishedFileId in removedModIds }
+                        val filteredRemote = remoteMods
+                            .filterNot { it.publishedFileId in removedModIds }
+                            .map { remote ->
+                                val localCreated = currentById[remote.publishedFileId]?.createdEpochSec ?: 0L
+                                if (remote.createdEpochSec <= 0L && localCreated > 0L) {
+                                    remote.copy(createdEpochSec = localCreated)
+                                } else {
+                                    remote
+                                }
+                            }
                         (keptPending + filteredRemote)
                             .distinctBy { it.publishedFileId }
                             .sortedByDescending { maxOf(it.updatedEpochSec, it.updatedAt?.seconds ?: 0L) }
@@ -263,6 +301,24 @@ class WorkshopViewModel(
         _uiState.update { it.copy(activeSectionTab = tab) }
         if (tab == WorkshopSectionTab.FOLLOWED) {
             val games = _uiState.value.followedGames
+            val store = localStore
+            if (store != null && games.isNotEmpty()) {
+                val storeKey = storeUserKey()
+                val nowEpochSec = System.currentTimeMillis() / 1000L
+                val existingMap = _uiState.value.followedGamesPreviousVisitEpochSec.toMutableMap()
+                val overallPrev = _uiState.value.previousWorkshopVisitEpochSec
+                games.forEach { game ->
+                    if (!existingMap.containsKey(game.appId)) {
+                        val saved = store.getGameLastVisitEpochSec(storeKey, game.appId)
+                        existingMap[game.appId] = if (saved > 0L) saved else overallPrev
+                    }
+                    if (recordedFollowedGameVisits.add(game.appId)) {
+                        store.saveGameLastVisitEpochSec(storeKey, game.appId, nowEpochSec)
+                    }
+                }
+                _uiState.update { it.copy(followedGamesPreviousVisitEpochSec = existingMap) }
+            }
+
             val feedState = _uiState.value.followedNewModsFeed
             if (games.isNotEmpty() && (feedState is WorkshopFollowedFeedUiState.Idle || feedState is WorkshopFollowedFeedUiState.Error)) {
                 refreshFollowedGamesFeed(games)
@@ -393,6 +449,7 @@ class WorkshopViewModel(
                             author = mod.author.ifBlank { item.author },
                             previewUrl = mod.previewUrl.ifBlank { item.previewUrl },
                             source = WorkshopFollowSource.BOTH,
+                            createdEpochSec = mod.createdEpochSec ?: item.createdEpochSec,
                             updatedAt = nowTs
                         )
                     } else {
@@ -420,6 +477,7 @@ class WorkshopViewModel(
                     source = WorkshopFollowSource.BOOKMARK,
                     updatedEpochSec = (mod.updatedEpochSec ?: 0L).coerceAtLeast(0L),
                     subscriptions = (mod.subscriptions ?: 0L).coerceAtLeast(0L),
+                    createdEpochSec = (mod.createdEpochSec ?: 0L).coerceAtLeast(0L),
                     createdAt = nowTs,
                     updatedAt = nowTs
                 )
@@ -892,6 +950,14 @@ class WorkshopViewModel(
     }
 
     fun openGameWorkshop(game: WorkshopGameSummary) {
+        val store = localStore
+        val storeKey = storeUserKey()
+        val prevGameVisit = store?.getGameLastVisitEpochSec(storeKey, game.appId)
+            ?.takeIf { it > 0L }
+            ?: _uiState.value.previousWorkshopVisitEpochSec
+        val nowEpochSec = System.currentTimeMillis() / 1000L
+        store?.saveGameLastVisitEpochSec(storeKey, game.appId, nowEpochSec)
+
         _uiState.update {
             it.copy(
                 selectedGame = game,
@@ -899,7 +965,8 @@ class WorkshopViewModel(
                 modSearchQuery = "",
                 modsState = WorkshopModsUiState.Loading,
                 isLoadingMoreMods = false,
-                selectedModDetail = null
+                selectedModDetail = null,
+                activeGamePreviousVisitEpochSec = prevGameVisit
             )
         }
         loadMods(appId = game.appId, sortOrder = WorkshopSortOrder.MOST_SUBSCRIBED, query = "", page = 1, append = false)

@@ -321,4 +321,67 @@ class SteamWorkshopRepositoryTest {
             )
         )
     }
+
+    @Test
+    fun parseWorkshopResponseBody_andHtml_extractCreatedEpochSec() {
+        val json = """
+            {
+              "response": {
+                "publishedfiledetails": [
+                  {
+                    "publishedfileid": "99112233",
+                    "consumer_app_id": 1643320,
+                    "title": "Zone Weather Overhaul",
+                    "time_created": 1763200000,
+                    "time_updated": 1763250000
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        val jsonMods = SteamWorkshopRepository.parseWorkshopResponseBody(json, 1643320)
+        assertEquals(1, jsonMods.size)
+        assertEquals(1763200000L, jsonMods[0].createdEpochSec)
+        assertEquals(1763250000L, jsonMods[0].updatedEpochSec)
+
+        val htmlWithTimestamps = """
+            <div class="workshopBrowseItems">
+              <div class="workshopItem" data-publishedfileid="111222333" data-time-created="1763100000">
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=111222333">
+                  <div class="workshopItemTitle">Data Attr Mod</div>
+                </a>
+              </div>
+              <div class="workshopBrowseRow" id="sharedfile_444555666">
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=444555666">
+                  <div class="workshopBrowseRowTitle">Date Div Mod</div>
+                </a>
+                <div class="workshopBrowseRowDate">15 Nov, 2026 @ 2:30pm</div>
+              </div>
+              <script>
+                SharedFileBindMouseHover( "sharedfile_777888999", true, { "id": "777888999", "title": "Hover Timestamp Mod", "time_created": 1763150000 } );
+              </script>
+            </div>
+        """.trimIndent()
+        val htmlMods = SteamWorkshopRepository.parseWorkshopBrowseHtml(htmlWithTimestamps, 1643320)
+        assertEquals(3, htmlMods.size)
+        assertEquals(1763100000L, htmlMods[0].createdEpochSec)
+        assertTrue((htmlMods[1].createdEpochSec ?: 0L) > 1_700_000_000L)
+        assertEquals(1763150000L, htmlMods[2].createdEpochSec)
+    }
+
+    @Test
+    fun parseSteamCommunityDateEpochSec_parsesExplicitAndYearlessDates() {
+        val explicit = SteamWorkshopRepository.parseSteamCommunityDateEpochSec("15 Nov, 2026 @ 2:30pm")
+        assertEquals(1794753000L, explicit)
+
+        val refFeb2026 = 1_770_000_000L // Feb 2026 UTC
+        val yearlessDec = SteamWorkshopRepository.parseSteamCommunityDateEpochSec("28 Dec @ 10:00am", refFeb2026)
+        // Dec 28 in 2026 is > 2 days in the future relative to Feb 2026, so it rolls back to Dec 28, 2025
+        val dec28_2025 = SteamWorkshopRepository.parseSteamCommunityDateEpochSec("28 Dec, 2025 @ 10:00am")
+        assertEquals(dec28_2025, yearlessDec)
+
+        val numeric = SteamWorkshopRepository.parseSteamCommunityDateEpochSec("1763200000")
+        assertEquals(1763200000L, numeric)
+    }
 }
+

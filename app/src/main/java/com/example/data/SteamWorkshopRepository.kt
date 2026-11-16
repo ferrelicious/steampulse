@@ -24,6 +24,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -169,6 +173,7 @@ class SteamWorkshopRepository(
                     favorites = detail.favorites ?: item.favorites,
                     views = detail.views ?: item.views,
                     fileSizeBytes = detail.fileSizeBytes ?: item.fileSizeBytes,
+                    createdEpochSec = detail.createdEpochSec ?: item.createdEpochSec,
                     updatedEpochSec = detail.updatedEpochSec ?: item.updatedEpochSec,
                     description = detail.description.ifBlank { item.description },
                     tags = if (detail.tags.isNotEmpty()) detail.tags else item.tags
@@ -281,6 +286,7 @@ class SteamWorkshopRepository(
                 favorites = fromApi.favorites ?: item.favorites,
                 views = fromApi.views ?: item.views,
                 fileSizeBytes = fromApi.fileSizeBytes ?: item.fileSizeBytes,
+                createdEpochSec = fromApi.createdEpochSec ?: item.createdEpochSec,
                 updatedEpochSec = fromApi.updatedEpochSec ?: item.updatedEpochSec,
                 description = fromApi.description,
                 tags = if (fromApi.tags.isNotEmpty()) fromApi.tags else item.tags
@@ -306,10 +312,13 @@ class SteamWorkshopRepository(
                 .orEmpty()
             val subscribers = SUBSCRIBERS_STAT_REGEX.find(html)?.groupValues?.getOrNull(1)
                 ?.replace(",", "")?.replace(" ", "")?.toLongOrNull()
+            val createdFromHtml = DETAIL_POSTED_DATE_REGEX.find(html)?.groupValues?.getOrNull(1)
+                ?.let { parseSteamCommunityDateEpochSec(cleanHtmlText(it)) }
 
             item.copy(
                 description = desc.ifBlank { item.description },
-                subscriptions = subscribers ?: item.subscriptions
+                subscriptions = subscribers ?: item.subscriptions,
+                createdEpochSec = item.createdEpochSec ?: createdFromHtml
             )
         }.getOrDefault(item)
     }
@@ -371,6 +380,7 @@ class SteamWorkshopRepository(
                             views = obj.optLong("views", -1L).takeIf { it >= 0L },
                             fileSizeBytes = obj.optString("file_size", "").toLongOrNull()
                                 ?: obj.optLong("file_size", -1L).takeIf { it > 0L },
+                            createdEpochSec = obj.optLong("time_created", 0L).takeIf { it > 0L },
                             updatedEpochSec = obj.optLong("time_updated", 0L).takeIf { it > 0L },
                             description = cleanBbCodeAndHtml(rawDesc),
                             tags = tags
@@ -508,6 +518,7 @@ class SteamWorkshopRepository(
                     title = detail.title.ifBlank { raw.title },
                     previewUrl = detail.previewUrl.ifBlank { raw.previewUrl },
                     subscriptions = detail.subscriptions ?: raw.subscriptions,
+                    createdEpochSec = detail.createdEpochSec ?: raw.createdEpochSec,
                     updatedEpochSec = detail.updatedEpochSec ?: raw.updatedEpochSec
                 )
             } else {
@@ -532,9 +543,10 @@ class SteamWorkshopRepository(
                 itemUrl = item.itemUrl,
                 source = WorkshopFollowSource.STEAM_SYNC,
                 updatedEpochSec = item.updatedEpochSec ?: 0L,
-                subscriptions = item.subscriptions ?: 0L
+                subscriptions = item.subscriptions ?: 0L,
+                createdEpochSec = item.createdEpochSec ?: 0L
             )
-        }.sortedByDescending { it.updatedEpochSec }
+        }.sortedByDescending { maxOf(it.createdEpochSec, it.updatedEpochSec) }
 
         SteamSubscribedSyncResult(
             steamId64 = steamId64,
@@ -742,6 +754,15 @@ class SteamWorkshopRepository(
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         private val ANY_IMG_TAG_REGEX = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
+        private val DATA_TIMESTAMP_ATTR_REGEX = Regex("""\bdata-(?:time-created|timestamp)\s*=\s*['"](\d{9,12})['"]""", RegexOption.IGNORE_CASE)
+        private val CONTAINER_DATE_REGEX = Regex(
+            """<(div|span)\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopBrowseRowDate|workshopItemDate|workshopItemCreated|fileDetailsCreated)\b[^'"]*['"][^>]*>(.*?)</\1>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
+        private val DETAIL_POSTED_DATE_REGEX = Regex(
+            """<div\b[^>]*class\s*=\s*['"][^'"]*\bdetailsStatLeft\b[^'"]*['"][^>]*>\s*(?:Posted|Skapad|Upplagd)\s*</div>\s*<div\b[^>]*class\s*=\s*['"][^'"]*\bdetailsStatRight\b[^'"]*['"][^>]*>(.*?)</div>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
         private val DETAIL_DESC_REGEX = Regex("""id="highlightContent"[^>]*>(.*?)</div>\s*</div>""", RegexOption.DOT_MATCHES_ALL)
         private val SUBSCRIBERS_STAT_REGEX = Regex("""<tr>\s*<td>([\d, ]+)</td>\s*<td>\s*Current Subscribers""", RegexOption.IGNORE_CASE)
 
@@ -976,6 +997,8 @@ class SteamWorkshopRepository(
                                     subscriptions = obj.optLong("subscriptions", -1L).takeIf { it >= 0L },
                                     favorites = obj.optLong("favorited", -1L).takeIf { it >= 0L },
                                     views = obj.optLong("views", -1L).takeIf { it >= 0L },
+                                    createdEpochSec = obj.optLong("time_created", 0L).takeIf { it > 0L },
+                                    updatedEpochSec = obj.optLong("time_updated", 0L).takeIf { it > 0L },
                                     description = cleanBbCodeAndHtml(obj.optString("description", ""))
                                 )
                             )
@@ -999,7 +1022,8 @@ class SteamWorkshopRepository(
                 author: String = "",
                 previewUrl: String = "",
                 ratingUrl: String = "",
-                description: String = ""
+                description: String = "",
+                createdEpochSec: Long? = null
             ) {
                 if (id.isBlank()) return
                 val cleanTitle = title.trim()
@@ -1007,6 +1031,7 @@ class SteamWorkshopRepository(
                 val cleanPreview = previewUrl.trim()
                 val cleanRating = ratingUrl.trim()
                 val cleanDesc = description.trim()
+                val validCreated = createdEpochSec?.takeIf { it > 0L }
 
                 val existing = byId[id]
                 if (existing == null) {
@@ -1018,6 +1043,7 @@ class SteamWorkshopRepository(
                         previewUrl = cleanPreview,
                         itemUrl = "https://steamcommunity.com/sharedfiles/filedetails/?id=$id",
                         ratingStarsUrl = cleanRating,
+                        createdEpochSec = validCreated,
                         description = cleanDesc
                     )
                 } else {
@@ -1036,6 +1062,7 @@ class SteamWorkshopRepository(
                         author = resolvedAuthor,
                         previewUrl = existing.previewUrl.ifBlank { cleanPreview },
                         ratingStarsUrl = existing.ratingStarsUrl.ifBlank { cleanRating },
+                        createdEpochSec = existing.createdEpochSec ?: validCreated,
                         description = existing.description.ifBlank { cleanDesc }
                     )
                 }
@@ -1090,12 +1117,18 @@ class SteamWorkshopRepository(
                         ?.replace("&amp;", "&")
                         .orEmpty()
 
+                    val containerCreatedSec = DATA_TIMESTAMP_ATTR_REGEX.find(window)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                        ?: CONTAINER_DATE_REGEX.find(window)?.groupValues?.getOrNull(2)?.let {
+                            parseSteamCommunityDateEpochSec(cleanHtmlText(it))
+                        }
+
                     mergeItem(
                         id = id,
                         title = title,
                         author = author,
                         previewUrl = previewUrl,
-                        ratingUrl = ratingUrl
+                        ratingUrl = ratingUrl,
+                        createdEpochSec = containerCreatedSec
                     )
                 }
             }
@@ -1109,11 +1142,13 @@ class SteamWorkshopRepository(
                     val hoverTitle = cleanHtmlText(obj.optString("title", ""))
                     val hoverDesc = cleanBbCodeAndHtml(obj.optString("description", ""))
                     val hoverAuthor = cleanHtmlText(obj.optString("author", ""))
+                    val hoverCreated = obj.optLong("time_created", 0L).takeIf { it > 0L }
                     mergeItem(
                         id = id,
                         title = hoverTitle,
                         author = hoverAuthor,
-                        description = hoverDesc
+                        description = hoverDesc,
+                        createdEpochSec = hoverCreated
                     )
                 }.onFailure {
                     mergeItem(id = id)
@@ -1169,6 +1204,77 @@ class SteamWorkshopRepository(
                 .replace(Regex("""\s+"""), " ")
                 .trim()
             return cleanHtmlText(strippedBb)
+        }
+
+        fun parseSteamCommunityDateEpochSec(
+            rawDateText: String,
+            referenceNowSec: Long = System.currentTimeMillis() / 1000L
+        ): Long? {
+            val cleaned = rawDateText.trim()
+                .replace(Regex("""^(?:Posted|Created|Skapad|Upplagd)\s*:?\s*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            if (cleaned.isBlank()) return null
+
+            cleaned.toLongOrNull()?.takeIf { it > 1_000_000_000L }?.let { return it }
+
+            val refCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                timeInMillis = referenceNowSec * 1000L
+            }
+            val currentYear = refCal.get(Calendar.YEAR)
+
+            val explicitYearFormats = listOf(
+                "d MMM, yyyy '@' h:mma",
+                "d MMM, yyyy '@' h:mm a",
+                "MMM d, yyyy '@' h:mma",
+                "MMM d, yyyy '@' h:mm a",
+                "d MMM yyyy '@' h:mma",
+                "MMM d yyyy '@' h:mma",
+                "d MMM, yyyy",
+                "MMM d, yyyy",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd"
+            )
+            for (pattern in explicitYearFormats) {
+                runCatching {
+                    val fmt = SimpleDateFormat(pattern, Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                        isLenient = false
+                    }
+                    fmt.parse(cleaned)?.let { date ->
+                        return date.time / 1000L
+                    }
+                }
+            }
+
+            val yearlessFormats = listOf(
+                "d MMM '@' h:mma",
+                "d MMM '@' h:mm a",
+                "MMM d '@' h:mma",
+                "MMM d '@' h:mm a",
+                "d MMM",
+                "MMM d"
+            )
+            for (pattern in yearlessFormats) {
+                runCatching {
+                    val fmt = SimpleDateFormat("$pattern yyyy", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                        isLenient = false
+                    }
+                    val parsedDate = fmt.parse("$cleaned $currentYear") ?: return@runCatching
+                    var sec = parsedDate.time / 1000L
+                    // If parsed date is > 2 days in the future, it belongs to the previous calendar year
+                    if (sec - referenceNowSec > 2 * 86_400L) {
+                        val prevDate = fmt.parse("$cleaned ${currentYear - 1}")
+                        if (prevDate != null) {
+                            sec = prevDate.time / 1000L
+                        }
+                    }
+                    return sec
+                }
+            }
+
+            return null
         }
     }
 }

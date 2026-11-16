@@ -116,4 +116,38 @@ class WorkshopLocalStoreTest {
         assertEquals(1, result.followedGames.size)
         assertEquals(570, result.followedGames.first().appId)
     }
+
+    @Test
+    fun visitTimestampsAndCreatedEpochSec_persistAndMigrateCleanly() {
+        assertEquals(0L, store.getWorkshopLastVisitEpochSec("u1"))
+        store.saveWorkshopLastVisitEpochSec("u1", 1_760_000_000L)
+        assertEquals(1_760_000_000L, store.getWorkshopLastVisitEpochSec("u1"))
+
+        store.saveGameLastVisitEpochSec("u1", 1643320, 1_760_100_000L)
+        assertEquals(1_760_100_000L, store.getGameLastVisitEpochSec("u1", 1643320))
+
+        val visitMap = store.loadGameLastVisitMap("u1", listOf(1643320, 294100))
+        assertEquals(1_760_100_000L, visitMap[1643320])
+        assertEquals(1_760_000_000L, visitMap[294100])
+
+        val savedMod = FollowedWorkshopMod(
+            id = "33880011",
+            userId = "u1",
+            publishedFileId = "33880011",
+            appId = 1643320,
+            title = "Artifact Detector Glow",
+            createdEpochSec = 1_760_200_000L,
+            updatedEpochSec = 1_760_210_000L,
+            source = WorkshopFollowSource.BOOKMARK
+        )
+        store.saveFollowedMods("u1", listOf(savedMod))
+        val loadedMod = store.loadSnapshot("u1").followedMods.first()
+        assertEquals(1_760_200_000L, loadedMod.createdEpochSec)
+        assertEquals(1_760_200_000L, loadedMod.toModItem().createdEpochSec)
+
+        store.saveWorkshopLastVisitEpochSec("guest", 1_760_500_000L)
+        store.migrateGuestDataIfEmpty("u2")
+        assertEquals(1_760_500_000L, store.getWorkshopLastVisitEpochSec("u2"))
+    }
 }
+

@@ -2,6 +2,7 @@ package com.example.model
 
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
+import com.google.firebase.firestore.Exclude
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
 
@@ -83,10 +84,25 @@ data class WorkshopModItem(
     val favorites: Long? = null,
     val views: Long? = null,
     val fileSizeBytes: Long? = null,
+    val createdEpochSec: Long? = null,
     val updatedEpochSec: Long? = null,
     val description: String = "",
     val tags: List<String> = emptyList()
-)
+) {
+    fun isNewMod(
+        previousVisitEpochSec: Long,
+        nowEpochSec: Long = System.currentTimeMillis() / 1000L
+    ): Boolean {
+        val created = createdEpochSec?.takeIf { it > 0L } ?: return false
+        val withinLast48Hours = (nowEpochSec - created) <= NEW_MOD_WINDOW_SECONDS
+        val createdAfterLastVisit = previousVisitEpochSec > 0L && created > previousVisitEpochSec
+        return withinLast48Hours || createdAfterLastVisit
+    }
+
+    companion object {
+        const val NEW_MOD_WINDOW_SECONDS = 48L * 3600L
+    }
+}
 
 data class WorkshopModsFetchResult(
     val mods: List<WorkshopModItem>,
@@ -139,6 +155,7 @@ data class FollowedWorkshopMod(
     val source: String = WorkshopFollowSource.BOOKMARK,
     val updatedEpochSec: Long = 0L,
     val subscriptions: Long = 0L,
+    @get:Exclude val createdEpochSec: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -151,6 +168,7 @@ data class FollowedWorkshopMod(
             previewUrl = previewUrl,
             itemUrl = itemUrl.ifBlank { "https://steamcommunity.com/sharedfiles/filedetails/?id=$publishedFileId" },
             subscriptions = subscriptions.takeIf { it > 0L },
+            createdEpochSec = createdEpochSec.takeIf { it > 0L },
             updatedEpochSec = updatedEpochSec.takeIf { it > 0L }
         )
     }

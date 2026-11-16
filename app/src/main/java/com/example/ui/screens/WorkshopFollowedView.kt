@@ -98,6 +98,7 @@ internal fun WorkshopFollowedView(
     onOpenModDetail: (WorkshopModItem) -> Unit,
     onToggleBookmarkMod: (WorkshopModItem, String?) -> Unit,
     onRemoveFollowedMod: (String) -> Unit,
+    onOpenModInSteam: (WorkshopModItem) -> Unit = {},
     onOpenSteamSyncDialog: () -> Unit,
     onLogoutSteamSession: () -> Unit = {}
 ) {
@@ -309,13 +310,17 @@ internal fun WorkshopFollowedView(
                             items = feedState.mods,
                             key = { "feed_${it.mod.appId}_${it.mod.publishedFileId}" }
                         ) { feedItem ->
+                            val prevVisit = uiState.followedGamesPreviousVisitEpochSec[feedItem.mod.appId]
+                                ?: uiState.previousWorkshopVisitEpochSec
                             FollowedFeedModCard(
                                 item = feedItem,
                                 isBookmarked = uiState.bookmarkedModIds.contains(feedItem.mod.publishedFileId),
+                                isNew = feedItem.mod.isNewMod(prevVisit),
                                 onClick = { onOpenModDetail(feedItem.mod) },
                                 onToggleBookmark = {
                                     onToggleBookmarkMod(feedItem.mod, feedItem.gameName)
-                                }
+                                },
+                                onOpenInSteam = { onOpenModInSteam(feedItem.mod) }
                             )
                         }
                     }
@@ -365,13 +370,18 @@ internal fun WorkshopFollowedView(
                 items = uiState.followedMods,
                 key = { "saved_${it.publishedFileId}" }
             ) { savedMod ->
+                val modItem = savedMod.toModItem()
+                val prevVisit = uiState.followedGamesPreviousVisitEpochSec[savedMod.appId]
+                    ?: uiState.previousWorkshopVisitEpochSec
                 FollowedSavedModCard(
                     savedMod = savedMod,
-                    onClick = { onOpenModDetail(savedMod.toModItem()) },
+                    isNew = modItem.isNewMod(prevVisit),
+                    onClick = { onOpenModDetail(modItem) },
                     onToggleBookmark = {
-                        onToggleBookmarkMod(savedMod.toModItem(), savedMod.gameName)
+                        onToggleBookmarkMod(modItem, savedMod.gameName)
                     },
-                    onRemove = { onRemoveFollowedMod(savedMod.publishedFileId) }
+                    onRemove = { onRemoveFollowedMod(savedMod.publishedFileId) },
+                    onOpenInSteam = { onOpenModInSteam(modItem) }
                 )
             }
         }
@@ -564,83 +574,111 @@ private fun SteamSyncStatusCard(
 private fun FollowedFeedModCard(
     item: FollowedFeedModItem,
     isBookmarked: Boolean,
+    isNew: Boolean,
     onClick: () -> Unit,
-    onToggleBookmark: () -> Unit
+    onToggleBookmark: () -> Unit,
+    onOpenInSteam: () -> Unit
 ) {
     val mod = item.mod
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = SteamSurface),
-        border = BorderStroke(1.dp, SteamBorder),
+        border = BorderStroke(
+            1.dp,
+            if (isNew) SteamSale.copy(alpha = 0.45f) else SteamBorder
+        ),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("followed_feed_mod_${mod.publishedFileId}")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            ModThumbnailBox(previewUrl = mod.previewUrl, contentDescription = mod.title)
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = mod.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = SteamTextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ModThumbnailBox(previewUrl = mod.previewUrl, contentDescription = mod.title)
+
+                Column(
+                    modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Surface(
-                        color = SteamAccent.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(6.dp)
+                    Text(
+                        text = mod.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = SteamTextPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            text = item.gameName,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = SteamAccent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        if (isNew) {
+                            ModNewBadgePill(
+                                modifier = Modifier.testTag("mod_new_badge_${mod.publishedFileId}")
+                            )
+                        }
+                        Surface(
+                            color = SteamAccent.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = item.gameName,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SteamAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        val displayEpoch = mod.createdEpochSec?.takeIf { it > 0L }
+                            ?: mod.updatedEpochSec?.takeIf { it > 0L }
+                        displayEpoch?.let { epoch ->
+                            Text(
+                                text = formatWorkshopEpochDate(epoch),
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontSize = 10.sp,
+                                color = SteamTextMuted
+                            )
+                        }
                     }
-                    mod.updatedEpochSec?.takeIf { it > 0L }?.let { epoch ->
-                        Text(
-                            text = formatWorkshopEpochDate(epoch),
-                            fontFamily = JetBrainsMonoFontFamily,
-                            fontSize = 10.sp,
-                            color = SteamTextMuted
-                        )
-                    }
+                    Text(
+                        text = "av ${mod.author.ifBlank { "Steam-skapare" }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SteamTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-                Text(
-                    text = "av ${mod.author.ifBlank { "Steam-skapare" }}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SteamTextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+
+                IconButton(
+                    onClick = onToggleBookmark,
+                    modifier = Modifier.minimumInteractiveComponentSize()
+                ) {
+                    Icon(
+                        imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        contentDescription = if (isBookmarked) "Ta bort bokmärke" else "Bokmärk modd",
+                        tint = if (isBookmarked) SteamNeon else SteamTextSecondary
+                    )
+                }
             }
 
-            IconButton(
-                onClick = onToggleBookmark,
-                modifier = Modifier.minimumInteractiveComponentSize()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    contentDescription = if (isBookmarked) "Ta bort bokmärke" else "Bokmärk modd",
-                    tint = if (isBookmarked) SteamNeon else SteamTextSecondary
+                OpenInSteamModButton(
+                    publishedFileId = mod.publishedFileId,
+                    onClick = onOpenInSteam
                 )
             }
         }
@@ -651,9 +689,11 @@ private fun FollowedFeedModCard(
 @Composable
 private fun FollowedSavedModCard(
     savedMod: FollowedWorkshopMod,
+    isNew: Boolean,
     onClick: () -> Unit,
     onToggleBookmark: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onOpenInSteam: () -> Unit
 ) {
     val isBookmarked = savedMod.source == WorkshopFollowSource.BOOKMARK ||
         savedMod.source == WorkshopFollowSource.BOTH
@@ -670,108 +710,133 @@ private fun FollowedSavedModCard(
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = SteamSurface),
-        border = BorderStroke(1.dp, SteamBorder),
+        border = BorderStroke(
+            1.dp,
+            if (isNew) SteamSale.copy(alpha = 0.45f) else SteamBorder
+        ),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("saved_followed_mod_${savedMod.publishedFileId}")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            ModThumbnailBox(previewUrl = savedMod.previewUrl, contentDescription = savedMod.title)
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = savedMod.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = SteamTextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+                ModThumbnailBox(previewUrl = savedMod.previewUrl, contentDescription = savedMod.title)
 
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Column(
+                    modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (savedMod.gameName.isNotBlank()) {
+                    Text(
+                        text = savedMod.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = SteamTextPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (isNew) {
+                            ModNewBadgePill(
+                                modifier = Modifier.testTag("mod_new_badge_${savedMod.publishedFileId}")
+                            )
+                        }
+                        if (savedMod.gameName.isNotBlank()) {
+                            Surface(
+                                color = SteamCard,
+                                border = BorderStroke(1.dp, SteamBorder),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = savedMod.gameName,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = SteamTextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Surface(
-                            color = SteamCard,
-                            border = BorderStroke(1.dp, SteamBorder),
+                            color = badgeColor.copy(alpha = 0.14f),
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = savedMod.gameName,
+                                text = sourceLabel,
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = SteamTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                color = badgeColor,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                softWrap = false,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
                     }
-                    Surface(
-                        color = badgeColor.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
+
+                    val updatedText = when {
+                        savedMod.updatedEpochSec > 0L -> "Uppdaterad ${formatWorkshopEpochDate(savedMod.updatedEpochSec)}"
+                        savedMod.createdEpochSec > 0L -> "Upplagd ${formatWorkshopEpochDate(savedMod.createdEpochSec)}"
+                        savedMod.updatedAt != null -> "Sparad ${formatWorkshopEpochDate(savedMod.updatedAt.seconds)}"
+                        else -> null
+                    }
+                    if (updatedText != null) {
                         Text(
-                            text = sourceLabel,
+                            text = updatedText,
+                            fontFamily = JetBrainsMonoFontFamily,
                             fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = badgeColor,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            color = SteamSale
                         )
                     }
                 }
 
-                val updatedText = when {
-                    savedMod.updatedEpochSec > 0L -> "Uppdaterad ${formatWorkshopEpochDate(savedMod.updatedEpochSec)}"
-                    savedMod.updatedAt != null -> "Sparad ${formatWorkshopEpochDate(savedMod.updatedAt.seconds)}"
-                    else -> null
-                }
-                if (updatedText != null) {
-                    Text(
-                        text = updatedText,
-                        fontFamily = JetBrainsMonoFontFamily,
-                        fontSize = 10.sp,
-                        color = SteamSale
-                    )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    IconButton(
+                        onClick = onToggleBookmark,
+                        modifier = Modifier.minimumInteractiveComponentSize()
+                    ) {
+                        Icon(
+                            imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            contentDescription = if (isBookmarked) "Ta bort bokmärke" else "Bokmärk modd",
+                            tint = if (isBookmarked) SteamNeon else SteamTextSecondary
+                        )
+                    }
+                    IconButton(
+                        onClick = onRemove,
+                        modifier = Modifier.minimumInteractiveComponentSize()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = "Ta bort modd",
+                            tint = SteamTextMuted
+                        )
+                    }
                 }
             }
 
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onToggleBookmark,
-                    modifier = Modifier.minimumInteractiveComponentSize()
-                ) {
-                    Icon(
-                        imageVector = if (isBookmarked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        contentDescription = if (isBookmarked) "Ta bort bokmärke" else "Bokmärk modd",
-                        tint = if (isBookmarked) SteamNeon else SteamTextSecondary
-                    )
-                }
-                IconButton(
-                    onClick = onRemove,
-                    modifier = Modifier.minimumInteractiveComponentSize()
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.DeleteOutline,
-                        contentDescription = "Ta bort modd",
-                        tint = SteamTextMuted
-                    )
-                }
+                OpenInSteamModButton(
+                    publishedFileId = savedMod.publishedFileId,
+                    onClick = onOpenInSteam
+                )
             }
         }
     }
