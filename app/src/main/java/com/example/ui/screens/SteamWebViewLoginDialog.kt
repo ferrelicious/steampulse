@@ -81,29 +81,35 @@ internal fun SteamWebViewLoginDialog(
         if (sessionCaptured) return
         val cm = runCatching { CookieManager.getInstance() }.getOrNull() ?: return
         val communityCookie = runCatching { cm.getCookie(STEAM_COMMUNITY_ORIGIN) }.getOrNull().orEmpty()
-        val urlCookie = if (!url.isNullOrBlank() && url.contains("steamcommunity.com", ignoreCase = true)) {
-            runCatching { cm.getCookie(url) }.getOrNull().orEmpty()
-        } else {
-            ""
-        }
 
-        val candidateCookie = when {
-            communityCookie.contains("steamLoginSecure=", ignoreCase = true) && communityCookie.contains("sessionid=", ignoreCase = true) -> communityCookie
-            urlCookie.contains("steamLoginSecure=", ignoreCase = true) && urlCookie.contains("sessionid=", ignoreCase = true) -> urlCookie
-            SteamWorkshopRepository.extractSteamId64FromCookie(communityCookie) != null -> communityCookie
-            SteamWorkshopRepository.extractSteamId64FromCookie(urlCookie) != null -> urlCookie
-            else -> null
-        } ?: return
+        val hasSecure = communityCookie.contains("steamLoginSecure=", ignoreCase = true)
+        val hasSessionId = communityCookie.contains("sessionid=", ignoreCase = true)
+        val steamId64 = SteamWorkshopRepository.extractSteamId64FromCookie(communityCookie)
 
-        if (!candidateCookie.contains("steamLoginSecure=", ignoreCase = true) || !candidateCookie.contains("sessionid=", ignoreCase = true)) {
+        if (hasSecure && hasSessionId && !steamId64.isNullOrBlank()) {
+            sessionCaptured = true
+            runCatching { cm.flush() }
+            val userAgent = webView?.settings?.userAgentString.orEmpty()
+            onSteamLoginCaptured(steamId64, communityCookie, userAgent)
             return
         }
 
-        val steamId64 = SteamWorkshopRepository.extractSteamId64FromCookie(candidateCookie) ?: return
-        sessionCaptured = true
-        runCatching { cm.flush() }
-        val userAgent = webView?.settings?.userAgentString.orEmpty()
-        onSteamLoginCaptured(steamId64, candidateCookie, userAgent)
+        val urlLower = url?.lowercase().orEmpty()
+        val isLoginOrStoreFinished = urlLower.contains("login.steampowered.com") ||
+            urlLower.contains("store.steampowered.com") ||
+            urlLower.contains("steamcommunity.com")
+
+        val anyCookie = if (!url.isNullOrBlank()) runCatching { cm.getCookie(url) }.getOrNull().orEmpty() else ""
+        val hasAnySecure = anyCookie.contains("steamLoginSecure=", ignoreCase = true) || communityCookie.contains("steamLoginSecure=", ignoreCase = true)
+
+        if (!hasSecure && hasAnySecure && isLoginOrStoreFinished) {
+            webView?.let { wv ->
+                val currentUrl = wv.url.orEmpty().lowercase()
+                if (!currentUrl.contains("steamcommunity.com")) {
+                    wv.loadUrl("https://steamcommunity.com/my/home")
+                }
+            }
+        }
     }
 
     Dialog(

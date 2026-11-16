@@ -834,7 +834,16 @@ class WorkshopViewModel(
     }
 
     fun dismissSteamWebViewLoginDialog() {
-        _uiState.update { it.copy(showSteamWebViewLoginDialog = false) }
+        val storeKey = storeUserKey()
+        val snapshot = localStore?.loadSnapshot(storeKey)
+        val isSessionActive = !snapshot?.steamSessionCookie.isNullOrBlank() || steamSessionCookie.isNotBlank()
+        _uiState.update { current ->
+            val active = current.hasSteamSession || isSessionActive || steamSessionCookie.isNotBlank()
+            current.copy(
+                showSteamWebViewLoginDialog = false,
+                hasSteamSession = active
+            )
+        }
     }
 
     fun onSteamWebViewAuthenticated(steamId64: String, cookieString: String, userAgentString: String = "") {
@@ -848,11 +857,19 @@ class WorkshopViewModel(
         steamSessionUserAgent = cleanUserAgent
         localStore?.saveSteamSession(storeUserKey(), cleanSteamId, cleanCookie, cleanUserAgent)
 
+        // Explicitly refresh the reactive isSteamConnected and steamId64 state from WorkshopLocalStore immediately
+        val storeKey = storeUserKey()
+        val snapshot = localStore?.loadSnapshot(storeKey)
+        val sessionId64 = snapshot?.steamSessionSteamId64.orEmpty()
+            .ifBlank { SteamWorkshopRepository.extractSteamId64FromCookie(snapshot?.steamSessionCookie.orEmpty()).orEmpty() }
+            .ifBlank { cleanSteamId }
+        val isSessionActive = !snapshot?.steamSessionCookie.isNullOrBlank() && sessionId64.isNotBlank()
+
         _uiState.update { current ->
             current.copy(
                 showSteamWebViewLoginDialog = false,
-                hasSteamSession = true,
-                steamSessionSteamId64 = cleanSteamId,
+                hasSteamSession = isSessionActive || cleanCookie.isNotBlank(),
+                steamSessionSteamId64 = sessionId64.ifBlank { cleanSteamId },
                 steamProfileInput = cleanSteamId,
                 steamSyncState = SteamSyncUiState.Idle
             )
