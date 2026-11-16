@@ -200,6 +200,8 @@ class AppUpdateManagerTest {
 
         composeTestRule.onNodeWithTag("app_update_dialog").assertIsDisplayed()
         composeTestRule.onNodeWithText("v1.0.0 → v1.2.0").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("app_update_version_comparison").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Installerad: v1.0.0  →  Ny version: v1.2.0").assertIsDisplayed()
         composeTestRule.onNodeWithTag("app_update_changelog").assertIsDisplayed()
         composeTestRule.onNodeWithTag("update_now_button").assertIsDisplayed().performClick()
         assertTrue(updateClicked)

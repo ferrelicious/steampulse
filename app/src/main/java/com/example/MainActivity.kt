@@ -233,6 +233,7 @@ fun AppNavigation(
                 hasAppUpdateAvailable = updateCoordinator.hasAvailableUpdate,
                 isCheckingAppUpdate = updateCoordinator.isChecking,
                 appUpdateStatusMessage = updateCoordinator.lastManualCheckMessage,
+                appUpdateLatestTag = updateCoordinator.latestRemoteTag,
                 updateMessagesFlow = updateMessagesFlow,
                 onCheckForUpdate = { updateCoordinator.checkForUpdates(manual = true) },
                 onNavigateToLogin = {
@@ -267,6 +268,7 @@ private fun AuthenticatedAppShell(
     hasAppUpdateAvailable: Boolean = false,
     isCheckingAppUpdate: Boolean = false,
     appUpdateStatusMessage: String? = null,
+    appUpdateLatestTag: String? = null,
     updateMessagesFlow: MutableSharedFlow<String>? = null,
     onCheckForUpdate: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {}
@@ -516,6 +518,7 @@ private fun AuthenticatedAppShell(
                                 steamSessionSteamId64 = workshopState.steamSessionSteamId64,
                                 isCheckingForUpdate = isCheckingAppUpdate,
                                 updateStatusMessage = appUpdateStatusMessage,
+                                latestGitHubVersion = appUpdateLatestTag,
                                 notificationsEnabled = workshopState.newModNotificationsEnabled,
                                 checkIntervalHours = workshopState.checkIntervalHours,
                                 notifyNewModsEnabled = workshopState.notifyNewModsEnabled,

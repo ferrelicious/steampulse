@@ -84,6 +84,8 @@ class AppUpdateCoordinator(
         private set
     var lastManualCheckMessage by mutableStateOf<String?>(null)
         private set
+    var latestRemoteTag by mutableStateOf<String?>(null)
+        private set
     var activeDownloadId by mutableStateOf<Long?>(null)
         private set
     var expectedApkFile by mutableStateOf<File?>(null)
@@ -103,12 +105,14 @@ class AppUpdateCoordinator(
                     is AppUpdateCheckOutcome.Available -> {
                         hasAvailableUpdate = true
                         pendingRelease = outcome.release
+                        latestRemoteTag = outcome.release.tagName
                         if (manual) {
                             lastManualCheckMessage = "Ny version hittades: ${outcome.release.tagName}"
                         }
                     }
                     is AppUpdateCheckOutcome.Dismissed -> {
                         hasAvailableUpdate = true
+                        latestRemoteTag = outcome.release.tagName
                         if (manual) {
                             pendingRelease = outcome.release
                             lastManualCheckMessage = "Ny version hittades: ${outcome.release.tagName}"
@@ -116,6 +120,8 @@ class AppUpdateCoordinator(
                     }
                     is AppUpdateCheckOutcome.UpToDate -> {
                         hasAvailableUpdate = false
+                        val tag = outcome.latestTag.ifBlank { "v${BuildConfig.VERSION_NAME}" }
+                        latestRemoteTag = tag
                         if (manual) {
                             val msg = "Du har redan den senaste versionen (v${BuildConfig.VERSION_NAME})"
                             lastManualCheckMessage = msg
@@ -332,6 +338,37 @@ fun AppUpdateDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Version comparison row before release notes
+                Surface(
+                    color = SteamBg,
+                    border = BorderStroke(1.dp, SteamNeon.copy(alpha = 0.35f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.NewReleases,
+                            contentDescription = null,
+                            tint = SteamNeon,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Installerad: v$currentVersionName  →  Ny version: ${release.tagName}",
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = SteamNeon,
+                            modifier = Modifier.testTag("app_update_version_comparison")
+                        )
+                    }
+                }
+
                 Surface(
                     color = SteamBg,
                     border = BorderStroke(1.dp, SteamBorder),

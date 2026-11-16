@@ -100,6 +100,7 @@ class SettingsScreenTest {
                     steamSessionSteamId64 = "",
                     isCheckingForUpdate = false,
                     updateStatusMessage = updateMessage,
+                    latestGitHubVersion = "v1.2.0",
                     notificationsEnabled = true,
                     checkIntervalHours = 2L,
                     notifyNewModsEnabled = true,
@@ -145,8 +146,13 @@ class SettingsScreenTest {
         composeTestRule.onNodeWithTag("settings_version_text")
             .assertIsDisplayed()
         composeTestRule.onNodeWithText(
-            "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})"
+            "Din version (installerad): v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})"
         ).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("settings_github_version")
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Senaste på GitHub: v1.2.0")
+            .assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("settings_check_updates_button")
             .performScrollTo()
@@ -155,6 +161,14 @@ class SettingsScreenTest {
         composeTestRule.onNodeWithTag("settings_update_status")
             .performScrollTo()
             .assertIsDisplayed()
+
+        // Centered muted footer at bottom
+        composeTestRule.onNodeWithTag("settings_about_footer")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText(
+            "SteamPulse & Deals • Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+        ).assertIsDisplayed()
 
         // 2. Quiet hours switch toggles start/end pickers
         composeTestRule.onNodeWithTag("settings_quiet_start_button").assertDoesNotExist()

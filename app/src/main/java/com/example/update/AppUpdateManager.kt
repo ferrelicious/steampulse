@@ -33,7 +33,7 @@ data class AppUpdateRelease(
 sealed interface AppUpdateCheckOutcome {
     data class Available(val release: AppUpdateRelease) : AppUpdateCheckOutcome
     data class Dismissed(val release: AppUpdateRelease) : AppUpdateCheckOutcome
-    data object UpToDate : AppUpdateCheckOutcome
+    data class UpToDate(val latestTag: String = "") : AppUpdateCheckOutcome
     data object NoApkAsset : AppUpdateCheckOutcome
     data class Error(val message: String) : AppUpdateCheckOutcome
 }
@@ -84,7 +84,7 @@ class AppUpdateManager(
                 httpClient.newCall(request).execute().use { response ->
                     val raw = response.body?.string().orEmpty()
                     when {
-                        response.code == 404 -> return@withContext AppUpdateCheckOutcome.UpToDate
+                        response.code == 404 -> return@withContext AppUpdateCheckOutcome.UpToDate()
                         response.code == 403 || response.code == 429 -> {
                             return@withContext AppUpdateCheckOutcome.Error(
                                 "GitHub API:s förfrågningsgräns nåddes tillfälligt. Försök igen senare."
@@ -112,7 +112,7 @@ class AppUpdateManager(
                 ?: return@withContext AppUpdateCheckOutcome.NoApkAsset
 
             if (!isRemoteVersionNewer(parsed.tagName, currentVersionName)) {
-                return@withContext AppUpdateCheckOutcome.UpToDate
+                return@withContext AppUpdateCheckOutcome.UpToDate(parsed.tagName)
             }
 
             if (!ignoreDismissed && isTagDismissed(parsed.tagName)) {

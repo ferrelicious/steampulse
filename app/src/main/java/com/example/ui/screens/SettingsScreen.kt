@@ -117,6 +117,7 @@ fun SettingsScreen(
     steamSessionSteamId64: String,
     isCheckingForUpdate: Boolean,
     updateStatusMessage: String?,
+    latestGitHubVersion: String? = null,
     notificationsEnabled: Boolean,
     checkIntervalHours: Long,
     notifyNewModsEnabled: Boolean,
@@ -236,19 +237,41 @@ fun SettingsScreen(
             icon = Icons.Rounded.SystemUpdate,
             accent = SteamNeon
         ) {
-            Text(
-                text = "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                color = SteamTextPrimary,
-                modifier = Modifier.testTag("settings_version_text")
-            )
-            Text(
-                text = "Paket: ${BuildConfig.APPLICATION_ID}",
-                style = MaterialTheme.typography.labelSmall,
-                color = SteamTextSecondary
-            )
+            Surface(
+                color = SteamBg,
+                border = BorderStroke(1.dp, SteamBorder),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Din version (installerad): v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = SteamNeon,
+                        modifier = Modifier.testTag("settings_version_text")
+                    )
+                    Text(
+                        text = "Senaste på GitHub: ${
+                            if (isCheckingForUpdate) "Söker..."
+                            else latestGitHubVersion ?: "Tryck nedan för att kontrollera"
+                        }",
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontSize = 11.sp,
+                        color = if (latestGitHubVersion != null) SteamAccent else SteamTextSecondary,
+                        modifier = Modifier.testTag("settings_github_version")
+                    )
+                    Text(
+                        text = "Paket: ${BuildConfig.APPLICATION_ID}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SteamTextSecondary.copy(alpha = 0.8f)
+                    )
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -862,6 +885,24 @@ fun SettingsScreen(
                 Spacer(Modifier.width(8.dp))
                 Text("Rensa lokal cache", color = SteamTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             }
+        }
+
+        // About Footer at Bottom of Settings
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp, bottom = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = "SteamPulse & Deals • Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                fontFamily = JetBrainsMonoFontFamily,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = SteamTextSecondary.copy(alpha = 0.7f),
+                modifier = Modifier.testTag("settings_about_footer")
+            )
         }
 
         Spacer(modifier = Modifier.height(18.dp))
