@@ -48,6 +48,10 @@ class WorkshopFollowRepository(
     }
 
     fun observeFollowedGames(userId: String): Flow<List<FollowedWorkshopGame>> = flow {
+        if (userId == "guest") {
+            emit(emptyList())
+            return@flow
+        }
         val path = "users/$userId/followed_games"
         emitAll(
             db.collection("users")
@@ -67,6 +71,10 @@ class WorkshopFollowRepository(
     }
 
     fun observeFollowedMods(userId: String): Flow<List<FollowedWorkshopMod>> = flow {
+        if (userId == "guest") {
+            emit(emptyList())
+            return@flow
+        }
         val path = "users/$userId/followed_mods"
         emitAll(
             db.collection("users")
@@ -88,6 +96,10 @@ class WorkshopFollowRepository(
     }
 
     fun observeSyncProfile(userId: String): Flow<SteamWorkshopSyncProfile?> = flow {
+        if (userId == "guest") {
+            emit(null)
+            return@flow
+        }
         val path = "users/$userId/workshop_sync/$SYNC_DOC_ID"
         emitAll(
             db.collection("users")

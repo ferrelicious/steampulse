@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -154,22 +155,51 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
+    val context = LocalContext.current
+    val localStore = remember { WorkshopLocalStore(context) }
+    var isGuestMode by remember { mutableStateOf(localStore.isGuestMode()) }
+
     val currentUser by auth.authStateFlow()
         .collectAsStateWithLifecycle(initialValue = auth.currentUser)
 
     val user = currentUser
-    if (user == null) {
-        AuthScreen(onAuthSuccess = {})
+    if (user == null && !isGuestMode) {
+        AuthScreen(
+            onAuthSuccess = {
+                localStore.setGuestMode(false)
+                isGuestMode = false
+                val newUid = auth.currentUser?.uid
+                if (!newUid.isNullOrBlank()) {
+                    localStore.migrateGuestDataIfEmpty(newUid)
+                }
+            },
+            onContinueAsGuest = {
+                localStore.setGuestMode(true)
+                isGuestMode = true
+            }
+        )
     } else {
-        key(user.uid) {
-            AuthenticatedAppShell(currentUserId = user.uid)
+        val effectiveUid = user?.uid ?: "guest"
+        key(effectiveUid) {
+            AuthenticatedAppShell(
+                currentUserId = effectiveUid,
+                isGuest = user == null,
+                onNavigateToLogin = {
+                    localStore.setGuestMode(false)
+                    isGuestMode = false
+                }
+            )
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AuthenticatedAppShell(currentUserId: String) {
+private fun AuthenticatedAppShell(
+    currentUserId: String,
+    isGuest: Boolean = false,
+    onNavigateToLogin: () -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
@@ -372,15 +402,54 @@ private fun AuthenticatedAppShell(currentUserId: String) {
                         }
                     }
 
+                    if (isGuest) {
+                        Surface(
+                            onClick = onNavigateToLogin,
+                            color = SteamAccent.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(9.dp),
+                            border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .minimumInteractiveComponentSize()
+                                .testTag("guest_login_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Person,
+                                    contentDescription = "Logga in",
+                                    tint = SteamAccent,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Logga in",
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    color = SteamAccent
+                                )
+                            }
+                        }
+                    }
+
                     IconButton(
-                        onClick = { signOut(credentialManager, scope) },
+                        onClick = {
+                            if (isGuest) {
+                                onNavigateToLogin()
+                            } else {
+                                signOut(credentialManager, scope)
+                            }
+                        },
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
                             .testTag("sign_out_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.Logout,
-                            contentDescription = "Logga ut",
+                            contentDescription = if (isGuest) "Avsluta gästläge" else "Logga ut",
                             tint = SteamTextSecondary,
                             modifier = Modifier.size(20.dp)
                         )

@@ -37,6 +37,10 @@ class WatchlistRepository(
     }
 
     fun observeWatchlist(userId: String): Flow<List<WatchlistItem>> = flow {
+        if (userId == "guest") {
+            emit(emptyList())
+            return@flow
+        }
         val path = "users/$userId/watchlist"
         emitAll(
             db.collection("users")

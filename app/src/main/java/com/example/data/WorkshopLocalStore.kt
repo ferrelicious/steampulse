@@ -110,6 +110,32 @@ class WorkshopLocalStore(
             .apply()
     }
 
+    fun isGuestMode(): Boolean {
+        return prefs.getBoolean(KEY_IS_GUEST_MODE, false)
+    }
+
+    fun setGuestMode(isGuest: Boolean) {
+        prefs.edit().putBoolean(KEY_IS_GUEST_MODE, isGuest).apply()
+    }
+
+    fun migrateGuestDataIfEmpty(newUserId: String) {
+        if (newUserId.isBlank() || newUserId == "guest") return
+        val guestSnapshot = loadSnapshot("guest")
+        val userSnapshot = loadSnapshot(newUserId)
+        if (userSnapshot.followedGames.isEmpty() && guestSnapshot.followedGames.isNotEmpty()) {
+            saveFollowedGames(newUserId, guestSnapshot.followedGames)
+        }
+        if (userSnapshot.followedMods.isEmpty() && guestSnapshot.followedMods.isNotEmpty()) {
+            saveFollowedMods(newUserId, guestSnapshot.followedMods)
+        }
+        if (userSnapshot.syncProfile == null && guestSnapshot.syncProfile != null) {
+            saveSyncProfile(newUserId, guestSnapshot.syncProfile)
+        }
+        if (userSnapshot.steamSessionCookie.isEmpty() && guestSnapshot.steamSessionCookie.isNotEmpty()) {
+            saveSteamSession(newUserId, guestSnapshot.steamSessionSteamId64, guestSnapshot.steamSessionCookie)
+        }
+    }
+
     private fun parseFollowedGames(raw: String): List<FollowedWorkshopGame> {
         if (raw.isBlank()) return emptyList()
         return runCatching {
@@ -197,5 +223,6 @@ class WorkshopLocalStore(
 
     companion object {
         private const val PREFS_NAME = "steam_pulse_workshop_local_store"
+        private const val KEY_IS_GUEST_MODE = "app_is_guest_mode"
     }
 }

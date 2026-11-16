@@ -165,7 +165,7 @@ class WorkshopViewModel(
 
     private fun startObservingFollowedState() {
         val repo = followRepository ?: return
-        val uid = userId?.takeIf { it.isNotBlank() } ?: return
+        val uid = userId?.takeIf { it.isNotBlank() && it != "guest" } ?: return
         val storeKey = storeUserKey()
 
         viewModelScope.launch {
@@ -323,6 +323,7 @@ class WorkshopViewModel(
         )
 
         val repo = followRepository ?: return
+        if (userId.isNullOrBlank() || userId == "guest") return
         viewModelScope.launch {
             try {
                 val res = if (currentlyFollowed) {
@@ -440,6 +441,7 @@ class WorkshopViewModel(
         )
 
         val repo = followRepository ?: return
+        if (userId.isNullOrBlank() || userId == "guest") return
         viewModelScope.launch {
             try {
                 repo.toggleBookmarkMod(mod, resolvedGameName, existingSource)
@@ -471,6 +473,7 @@ class WorkshopViewModel(
         _toastEvents.tryEmit("Tog bort modden från Mina & Följda")
 
         val repo = followRepository ?: return
+        if (userId.isNullOrBlank() || userId == "guest") return
         viewModelScope.launch {
             try {
                 repo.removeFollowedMod(publishedFileId)
@@ -700,7 +703,7 @@ class WorkshopViewModel(
 
                 // Step 3: Non-blocking background sync to Firestore (NEVER uploads steamSessionCookie); never fails or blocks the Steam dialog.
                 val repo = followRepository
-                if (repo != null && !userId.isNullOrBlank()) {
+                if (repo != null && !userId.isNullOrBlank() && userId != "guest") {
                     viewModelScope.launch {
                         try {
                             repo.syncSubscribedMods(
