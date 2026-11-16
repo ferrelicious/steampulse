@@ -43,6 +43,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,7 +70,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.data.WorkshopLocalStore
 import com.example.model.FollowedFeedModItem
+import com.example.model.FollowedModsFilterMode
 import com.example.model.FollowedWorkshopGame
 import com.example.model.FollowedWorkshopMod
 import com.example.model.SteamSyncUiState
@@ -100,7 +104,9 @@ internal fun WorkshopFollowedView(
     isNewModNotificationsActive: Boolean = false,
     hasNotificationPermission: Boolean = true,
     onToggleNewModNotifications: (Boolean) -> Unit = {},
+    onSelectCheckIntervalHours: (Long) -> Unit = {},
     onTestNotification: () -> Unit = {},
+    onSelectFollowedModsFilter: (FollowedModsFilterMode) -> Unit = {},
     onOpenGameWorkshop: (WorkshopGameSummary) -> Unit,
     onToggleFollowGame: (WorkshopGameSummary) -> Unit,
     onRefreshFollowedFeed: () -> Unit,
@@ -121,7 +127,9 @@ internal fun WorkshopFollowedView(
             WorkshopNotificationSettingsRow(
                 isEnabled = isNewModNotificationsActive,
                 hasPermission = hasNotificationPermission,
+                checkIntervalHours = uiState.checkIntervalHours,
                 onToggle = onToggleNewModNotifications,
+                onSelectIntervalHours = onSelectCheckIntervalHours,
                 onTestNotification = onTestNotification
             )
         }
@@ -349,14 +357,80 @@ internal fun WorkshopFollowedView(
 
         // 2. Bookmarked Mods & Synced Steam Favorites Section
         item(key = "saved_mods_header") {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "BOKMÄRKTA MODDAR & STEAM-FAVORITER (${uiState.followedMods.size})",
-                style = MaterialTheme.typography.labelSmall,
-                color = SteamNeon
-            )
+            val updatedCount = uiState.updatedFollowedModsCount
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "BOKMÄRKTA MODDAR & STEAM-FAVORITER (${uiState.followedMods.size})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SteamNeon
+                )
+                if (uiState.followedMods.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FollowedModsFilterMode.entries.forEach { mode ->
+                            val selected = uiState.followedModsFilterMode == mode
+                            val labelText = when (mode) {
+                                FollowedModsFilterMode.ALL -> "Alla (${uiState.followedMods.size})"
+                                FollowedModsFilterMode.RECENTLY_UPDATED -> "Nyligen uppdaterade ($updatedCount)"
+                            }
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSelectFollowedModsFilter(mode) },
+                                label = {
+                                    Text(
+                                        text = labelText,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = SteamSurface,
+                                    labelColor = SteamTextSecondary,
+                                    selectedContainerColor = if (mode == FollowedModsFilterMode.RECENTLY_UPDATED) {
+                                        SteamAmber.copy(alpha = 0.2f)
+                                    } else {
+                                        SteamNeon.copy(alpha = 0.18f)
+                                    },
+                                    selectedLabelColor = if (mode == FollowedModsFilterMode.RECENTLY_UPDATED) {
+                                        SteamAmber
+                                    } else {
+                                        SteamNeon
+                                    }
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = selected,
+                                    borderColor = SteamBorder,
+                                    selectedBorderColor = if (mode == FollowedModsFilterMode.RECENTLY_UPDATED) {
+                                        SteamAmber
+                                    } else {
+                                        SteamNeon
+                                    }
+                                ),
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag(
+                                        if (mode == FollowedModsFilterMode.ALL) {
+                                            "filter_followed_all"
+                                        } else {
+                                            "filter_followed_updated"
+                                        }
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
         }
 
+        val displayedMods = uiState.filteredFollowedMods
         if (uiState.followedMods.isEmpty()) {
             item(key = "saved_mods_empty") {
                 Card(
@@ -384,17 +458,46 @@ internal fun WorkshopFollowedView(
                     }
                 }
             }
+        } else if (displayedMods.isEmpty()) {
+            item(key = "saved_mods_filtered_empty") {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SteamSurface),
+                    border = BorderStroke(1.dp, SteamBorder),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Inga olästa modd-uppdateringar just nu",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = SteamTextPrimary
+                        )
+                        Text(
+                            text = "Alla dina prenumererade moddar är lästa och aktuella. Tryck på \"Alla\" för att visa hela listan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SteamTextSecondary
+                        )
+                    }
+                }
+            }
         } else {
             items(
-                items = uiState.followedMods,
+                items = displayedMods,
                 key = { "saved_${it.publishedFileId}" }
             ) { savedMod ->
                 val modItem = savedMod.toModItem()
                 val prevVisit = uiState.followedGamesPreviousVisitEpochSec[savedMod.appId]
                     ?: uiState.previousWorkshopVisitEpochSec
+                val seenUpdated = uiState.seenModUpdateEpochSec[savedMod.publishedFileId] ?: 0L
                 FollowedSavedModCard(
                     savedMod = savedMod,
                     isNew = modItem.isNewMod(prevVisit),
+                    isUpdated = modItem.isUpdatedMod(seenUpdated),
                     onClick = { onOpenModDetail(modItem) },
                     onToggleBookmark = {
                         onToggleBookmarkMod(modItem, savedMod.gameName)
@@ -421,7 +524,9 @@ internal fun WorkshopFollowedView(
 private fun WorkshopNotificationSettingsRow(
     isEnabled: Boolean,
     hasPermission: Boolean,
+    checkIntervalHours: Long,
     onToggle: (Boolean) -> Unit,
+    onSelectIntervalHours: (Long) -> Unit,
     onTestNotification: () -> Unit
 ) {
     Surface(
@@ -435,64 +540,121 @@ private fun WorkshopNotificationSettingsRow(
             .fillMaxWidth()
             .testTag("workshop_notifications_settings_card")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                imageVector = if (isEnabled) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
-                contentDescription = null,
-                tint = if (isEnabled) SteamNeon else SteamTextMuted,
-                modifier = Modifier.size(20.dp)
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Notiser för nya moddar",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = SteamTextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = when {
-                        isEnabled -> "Bakgrundskoll var 2:a timme"
-                        !hasPermission -> "Tryck på switchen för att tillåta notiser"
-                        else -> "Avstängd för följda spel"
-                    },
-                    fontSize = 11.sp,
-                    color = SteamTextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            IconButton(
-                onClick = onTestNotification,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .testTag("test_new_mod_notification_button")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.NotificationAdd,
-                    contentDescription = "Testa notis",
-                    tint = SteamAccent,
+                    imageVector = if (isEnabled) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                    contentDescription = null,
+                    tint = if (isEnabled) SteamNeon else SteamTextMuted,
                     modifier = Modifier.size(20.dp)
                 )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Notiser för nya moddar",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = SteamTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val intervalSubtitle = if (checkIntervalHours == 1L) {
+                        "Bakgrundskoll varje timme"
+                    } else {
+                        "Bakgrundskoll var ${checkIntervalHours}:e timme"
+                    }
+                    Text(
+                        text = when {
+                            isEnabled -> intervalSubtitle
+                            !hasPermission -> "Tryck på switchen för att tillåta notiser"
+                            else -> "Avstängd för följda spel"
+                        },
+                        fontSize = 11.sp,
+                        color = SteamTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(
+                    onClick = onTestNotification,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("test_new_mod_notification_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.NotificationAdd,
+                        contentDescription = "Testa notis",
+                        tint = SteamAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Switch(
+                    checked = isEnabled,
+                    onCheckedChange = onToggle,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color(0xFF020617),
+                        checkedTrackColor = SteamNeon,
+                        uncheckedThumbColor = SteamTextSecondary,
+                        uncheckedTrackColor = SteamCard,
+                        uncheckedBorderColor = SteamBorder
+                    ),
+                    modifier = Modifier.testTag("new_mod_notifications_switch")
+                )
             }
-            Switch(
-                checked = isEnabled,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFF020617),
-                    checkedTrackColor = SteamNeon,
-                    uncheckedThumbColor = SteamTextSecondary,
-                    uncheckedTrackColor = SteamCard,
-                    uncheckedBorderColor = SteamBorder
-                ),
-                modifier = Modifier.testTag("new_mod_notifications_switch")
-            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Intervall:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = SteamTextMuted
+                )
+                WorkshopLocalStore.SUPPORTED_CHECK_INTERVAL_HOURS.forEach { hours ->
+                    val selected = checkIntervalHours == hours
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onSelectIntervalHours(hours) },
+                        label = {
+                            Text(
+                                text = "$hours tim",
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = SteamCard,
+                            labelColor = SteamTextSecondary,
+                            selectedContainerColor = SteamAccent.copy(alpha = 0.2f),
+                            selectedLabelColor = SteamAccent
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selected,
+                            borderColor = SteamBorder,
+                            selectedBorderColor = SteamAccent
+                        ),
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("interval_chip_${hours}h")
+                    )
+                }
+            }
         }
     }
 }
@@ -789,6 +951,7 @@ private fun FollowedFeedModCard(
 private fun FollowedSavedModCard(
     savedMod: FollowedWorkshopMod,
     isNew: Boolean,
+    isUpdated: Boolean,
     onClick: () -> Unit,
     onToggleBookmark: () -> Unit,
     onRemove: () -> Unit,
@@ -805,14 +968,16 @@ private fun FollowedSavedModCard(
         WorkshopFollowSource.BOTH, WorkshopFollowSource.STEAM_SYNC -> SteamNeon
         else -> SteamAccent
     }
+    val cardBorderColor = when {
+        isUpdated -> SteamAmber.copy(alpha = 0.55f)
+        isNew -> SteamSale.copy(alpha = 0.45f)
+        else -> SteamBorder
+    }
 
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = SteamSurface),
-        border = BorderStroke(
-            1.dp,
-            if (isNew) SteamSale.copy(alpha = 0.45f) else SteamBorder
-        ),
+        border = BorderStroke(1.dp, cardBorderColor),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -847,6 +1012,11 @@ private fun FollowedSavedModCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        if (isUpdated) {
+                            ModUpdatedBadgePill(
+                                modifier = Modifier.testTag("mod_updated_badge_${savedMod.publishedFileId}")
+                            )
+                        }
                         if (isNew) {
                             ModNewBadgePill(
                                 modifier = Modifier.testTag("mod_new_badge_${savedMod.publishedFileId}")

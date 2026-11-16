@@ -8,6 +8,7 @@ import com.example.data.SteamSessionExpiredException
 import com.example.data.SteamWorkshopRepository
 import com.example.data.WorkshopFollowRepository
 import com.example.data.WorkshopLocalStore
+import com.example.model.FollowedModsFilterMode
 import com.example.model.FollowedWorkshopGame
 import com.example.model.FollowedWorkshopMod
 import com.example.model.SteamSyncUiState
@@ -64,7 +65,10 @@ data class WorkshopScreenUiState(
     val previousWorkshopVisitEpochSec: Long = 0L,
     val activeGamePreviousVisitEpochSec: Long = 0L,
     val followedGamesPreviousVisitEpochSec: Map<Int, Long> = emptyMap(),
-    val newModNotificationsEnabled: Boolean = true
+    val newModNotificationsEnabled: Boolean = true,
+    val checkIntervalHours: Long = WorkshopLocalStore.DEFAULT_CHECK_INTERVAL_HOURS,
+    val followedModsFilterMode: FollowedModsFilterMode = FollowedModsFilterMode.ALL,
+    val seenModUpdateEpochSec: Map<String, Long> = emptyMap()
 ) {
     val isShowingStoreSearch: Boolean
         get() = storeSearchResults != null
@@ -76,6 +80,19 @@ data class WorkshopScreenUiState(
         get() = followedMods.filter {
             it.source == WorkshopFollowSource.BOOKMARK || it.source == WorkshopFollowSource.BOTH
         }.map { it.publishedFileId }.toSet()
+
+    val updatedFollowedModsCount: Int
+        get() = followedMods.count {
+            it.toModItem().isUpdatedMod(seenModUpdateEpochSec[it.publishedFileId] ?: 0L)
+        }
+
+    val filteredFollowedMods: List<FollowedWorkshopMod>
+        get() = when (followedModsFilterMode) {
+            FollowedModsFilterMode.ALL -> followedMods
+            FollowedModsFilterMode.RECENTLY_UPDATED -> followedMods
+                .filter { it.toModItem().isUpdatedMod(seenModUpdateEpochSec[it.publishedFileId] ?: 0L) }
+                .sortedByDescending { it.updatedEpochSec }
+        }
 
     val filteredGames: List<WorkshopGameSummary>
         get() {
@@ -147,6 +164,8 @@ class WorkshopViewModel(
             .ifBlank { SteamWorkshopRepository.extractSteamId64FromCookie(snapshot.steamSessionCookie).orEmpty() }
         val isSessionActive = snapshot.steamSessionCookie.isNotBlank() && sessionId64.isNotBlank()
 
+        val seenUpdates = store.initializeModUpdateBaselinesIfMissing(storeKey, snapshot.followedMods)
+
         _uiState.update { current ->
             val prefill = current.steamProfileInput.ifBlank {
                 snapshot.syncProfile?.profileInput.orEmpty()
@@ -162,10 +181,46 @@ class WorkshopViewModel(
                 steamSessionSteamId64 = if (isSessionActive) sessionId64 else "",
                 previousWorkshopVisitEpochSec = prevWorkshopVisit,
                 followedGamesPreviousVisitEpochSec = followedPrevMap,
-                newModNotificationsEnabled = store.isNewModNotificationsEnabled(storeKey)
+                newModNotificationsEnabled = store.isNewModNotificationsEnabled(storeKey),
+                checkIntervalHours = store.getCheckIntervalHours(storeKey),
+                seenModUpdateEpochSec = seenUpdates
             )
         }
         lastFeedGameIds = snapshot.followedGames.map { it.appId }.toSet()
+    }
+
+    fun selectFollowedModsFilter(mode: FollowedModsFilterMode) {
+        _uiState.update { it.copy(followedModsFilterMode = mode) }
+    }
+
+    fun selectCheckIntervalHours(hours: Long) {
+        val storeKey = storeUserKey()
+        localStore?.setCheckIntervalHours(storeKey, hours)
+        val sanitized = localStore?.getCheckIntervalHours(storeKey)
+            ?: if (hours in WorkshopLocalStore.SUPPORTED_CHECK_INTERVAL_HOURS) hours else WorkshopLocalStore.DEFAULT_CHECK_INTERVAL_HOURS
+        _uiState.update { it.copy(checkIntervalHours = sanitized) }
+    }
+
+    fun markModUpdateSeen(mod: WorkshopModItem) {
+        val storeKey = storeUserKey()
+        val storedModUpdated = _uiState.value.followedMods
+            .firstOrNull { it.publishedFileId == mod.publishedFileId }
+            ?.updatedEpochSec
+            ?: 0L
+        val effectiveUpdated = maxOf(mod.updatedEpochSec ?: 0L, storedModUpdated)
+        if (effectiveUpdated <= 0L) return
+
+        localStore?.saveModUpdateSeen(storeKey, mod.publishedFileId, effectiveUpdated)
+        _uiState.update { current ->
+            val prev = current.seenModUpdateEpochSec[mod.publishedFileId] ?: 0L
+            if (effectiveUpdated > prev) {
+                current.copy(
+                    seenModUpdateEpochSec = current.seenModUpdateEpochSec + (mod.publishedFileId to effectiveUpdated)
+                )
+            } else {
+                current
+            }
+        }
     }
 
     fun setNewModNotificationsEnabled(enabled: Boolean) {
@@ -272,7 +327,17 @@ class WorkshopViewModel(
                             .sortedByDescending { maxOf(it.updatedEpochSec, it.updatedAt?.seconds ?: 0L) }
                     }
 
-                    _uiState.update { it.copy(followedMods = mergedMods) }
+                    val seenUpdates = localStore?.initializeModUpdateBaselinesIfMissing(
+                        userId = storeKey,
+                        mods = mergedMods,
+                        previousLocalById = currentById
+                    )
+                    _uiState.update { current ->
+                        current.copy(
+                            followedMods = mergedMods,
+                            seenModUpdateEpochSec = seenUpdates ?: current.seenModUpdateEpochSec
+                        )
+                    }
                     localStore?.saveFollowedMods(storeKey, mergedMods)
                 }
         }
@@ -314,8 +379,43 @@ class WorkshopViewModel(
     fun selectSectionTab(tab: WorkshopSectionTab) {
         _uiState.update { it.copy(activeSectionTab = tab) }
         if (tab == WorkshopSectionTab.FOLLOWED) {
-            val games = _uiState.value.followedGames
             val store = localStore
+            val storeKey = storeUserKey()
+            // Pick up any updated timestamps persisted in the background by WorkshopCheckWorker.
+            if (store != null) {
+                val localSnapshot = store.loadSnapshot(storeKey)
+                val localById = localSnapshot.followedMods.associateBy { it.publishedFileId }
+                if (localById.isNotEmpty()) {
+                    val currentMods = _uiState.value.followedMods
+                    val currentById = currentMods.associateBy { it.publishedFileId }
+                    val mergedLatest = currentMods.map { cur ->
+                        val local = localById[cur.publishedFileId]
+                        if (local != null && local.updatedEpochSec > cur.updatedEpochSec) {
+                            cur.copy(
+                                updatedEpochSec = local.updatedEpochSec,
+                                createdEpochSec = cur.createdEpochSec.takeIf { it > 0L } ?: local.createdEpochSec
+                            )
+                        } else {
+                            cur
+                        }
+                    }
+                    if (mergedLatest != currentMods) {
+                        val seenUpdates = store.initializeModUpdateBaselinesIfMissing(
+                            userId = storeKey,
+                            mods = mergedLatest,
+                            previousLocalById = currentById
+                        )
+                        _uiState.update {
+                            it.copy(
+                                followedMods = mergedLatest,
+                                seenModUpdateEpochSec = seenUpdates
+                            )
+                        }
+                    }
+                }
+            }
+
+            val games = _uiState.value.followedGames
             if (store != null && games.isNotEmpty()) {
                 val storeKey = storeUserKey()
                 val nowEpochSec = System.currentTimeMillis() / 1000L
@@ -543,8 +643,14 @@ class WorkshopViewModel(
         pendingLocalModIds.remove(publishedFileId)
         removedModIds.add(publishedFileId)
         val updatedMods = _uiState.value.followedMods.filterNot { it.publishedFileId == publishedFileId }
-        _uiState.update { it.copy(followedMods = updatedMods) }
         localStore?.saveFollowedMods(storeKey, updatedMods)
+        localStore?.removeSeenModUpdate(storeKey, publishedFileId)
+        _uiState.update { current ->
+            current.copy(
+                followedMods = updatedMods,
+                seenModUpdateEpochSec = current.seenModUpdateEpochSec - publishedFileId
+            )
+        }
         _toastEvents.tryEmit("Tog bort modden från Mina & Följda")
 
         val repo = followRepository ?: return
@@ -738,13 +844,19 @@ class WorkshopViewModel(
                     hasPendingLocalSyncProfile = true
                     localStore?.saveFollowedMods(storeKey, mergedMods)
                     localStore?.saveSyncProfile(storeKey, newProfile)
+                    val updatedSeenMap = localStore?.initializeModUpdateBaselinesIfMissing(
+                        userId = storeKey,
+                        mods = mergedMods,
+                        previousLocalById = existingById
+                    )
 
-                    _uiState.update {
-                        it.copy(
+                    _uiState.update { current ->
+                        current.copy(
                             followedMods = mergedMods,
                             syncProfile = newProfile,
                             steamSyncState = SteamSyncUiState.Success(syncResult.steamId64, syncResult.mods.size),
-                            showSteamSyncDialog = false
+                            showSteamSyncDialog = false,
+                            seenModUpdateEpochSec = updatedSeenMap ?: current.seenModUpdateEpochSec
                         )
                     }
                     _toastEvents.tryEmit(
@@ -1137,11 +1249,13 @@ class WorkshopViewModel(
     }
 
     fun openModDetail(mod: WorkshopModItem) {
+        markModUpdateSeen(mod)
         _uiState.update { it.copy(selectedModDetail = mod, isModDetailLoading = true) }
         loadDetailJob?.cancel()
         loadDetailJob = viewModelScope.launch {
             try {
                 val enriched = repository.fetchModDetails(mod)
+                markModUpdateSeen(enriched)
                 _uiState.update { current ->
                     if (current.selectedModDetail?.publishedFileId == mod.publishedFileId) {
                         current.copy(selectedModDetail = enriched, isModDetailLoading = false)

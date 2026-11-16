@@ -92,6 +92,59 @@ class WorkshopModelsAndDeepLinkTest {
     }
 
     @Test
+    fun isUpdatedMod_evaluatesSeenTimestampAnd48HourWindowCorrectly() {
+        val now = 1_765_000_000L
+        val recentlyUpdatedMod = WorkshopModItem(
+            publishedFileId = "101",
+            appId = 1643320,
+            title = "Recent Update Mod",
+            author = "Author",
+            previewUrl = "",
+            itemUrl = "",
+            updatedEpochSec = now - (6L * 3600L)
+        )
+        val olderUpdatedMod = WorkshopModItem(
+            publishedFileId = "102",
+            appId = 1643320,
+            title = "Older Update Mod",
+            author = "Author",
+            previewUrl = "",
+            itemUrl = "",
+            updatedEpochSec = now - (72L * 3600L)
+        )
+        val noUpdatedTimestamp = WorkshopModItem(
+            publishedFileId = "103",
+            appId = 1643320,
+            title = "Missing Update Timestamp",
+            author = "Author",
+            previewUrl = "",
+            itemUrl = "",
+            updatedEpochSec = null
+        )
+
+        // Never seen yet (0L): only mods updated within last 48 hours count as updated
+        assertTrue(recentlyUpdatedMod.isUpdatedMod(lastSeenUpdatedEpochSec = 0L, nowEpochSec = now))
+        assertFalse(olderUpdatedMod.isUpdatedMod(lastSeenUpdatedEpochSec = 0L, nowEpochSec = now))
+        assertFalse(noUpdatedTimestamp.isUpdatedMod(lastSeenUpdatedEpochSec = 0L, nowEpochSec = now))
+
+        // After marking as seen at its current updatedEpochSec -> false
+        assertFalse(
+            recentlyUpdatedMod.isUpdatedMod(
+                lastSeenUpdatedEpochSec = recentlyUpdatedMod.updatedEpochSec!!,
+                nowEpochSec = now
+            )
+        )
+
+        // Even if updated > 48h ago, if remote updatedEpochSec > lastSeenUpdatedEpochSec (> 0L) -> true
+        assertTrue(
+            olderUpdatedMod.isUpdatedMod(
+                lastSeenUpdatedEpochSec = olderUpdatedMod.updatedEpochSec!! - 3600L,
+                nowEpochSec = now
+            )
+        )
+    }
+
+    @Test
     fun steamDeepLinkHelper_buildsSteamUriAndFallsBackToBrowserOnActivityNotFound() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         assertEquals(

@@ -383,5 +383,34 @@ class SteamWorkshopRepositoryTest {
         val numeric = SteamWorkshopRepository.parseSteamCommunityDateEpochSec("1763200000")
         assertEquals(1763200000L, numeric)
     }
+
+    @Test
+    fun parseWorkshopBrowseHtml_extractsUpdatedTimestampsFromAttributesHoverAndDivs() {
+        val htmlWithUpdates = """
+            <div class="workshopBrowseItems">
+              <div class="workshopItem" data-publishedfileid="211111111" data-time-updated="1765500000">
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=211111111">
+                  <div class="workshopItemTitle">Attr Updated Mod</div>
+                </a>
+              </div>
+              <div class="workshopBrowseRow" id="sharedfile_222222222">
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=222222222">
+                  <div class="workshopBrowseRowTitle">Updated Label Mod</div>
+                </a>
+                <div class="workshopItemUpdated">Updated 15 Nov, 2026 @ 2:30pm</div>
+              </div>
+              <script>
+                SharedFileBindMouseHover( "sharedfile_233333333", true, { "id": "233333333", "title": "Hover Updated Mod", "time_created": 1765100000, "time_updated": 1765600000 } );
+              </script>
+            </div>
+        """.trimIndent()
+
+        val items = SteamWorkshopRepository.parseWorkshopBrowseHtml(htmlWithUpdates, 1643320)
+        assertEquals(3, items.size)
+        assertEquals(1765500000L, items[0].updatedEpochSec)
+        assertEquals(1794753000L, items[1].updatedEpochSec)
+        assertEquals(1765100000L, items[2].createdEpochSec)
+        assertEquals(1765600000L, items[2].updatedEpochSec)
+    }
 }
 

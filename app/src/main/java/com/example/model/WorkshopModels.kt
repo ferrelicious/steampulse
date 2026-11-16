@@ -20,6 +20,11 @@ enum class WorkshopSectionTab(val label: String) {
     FOLLOWED("Mina & Följda")
 }
 
+enum class FollowedModsFilterMode(val label: String) {
+    ALL("Alla"),
+    RECENTLY_UPDATED("Nyligen uppdaterade")
+}
+
 enum class WorkshopSortOrder(
     val label: String,
     val browseSort: String,
@@ -97,6 +102,17 @@ data class WorkshopModItem(
         val withinLast48Hours = (nowEpochSec - created) <= NEW_MOD_WINDOW_SECONDS
         val createdAfterLastVisit = previousVisitEpochSec > 0L && created > previousVisitEpochSec
         return withinLast48Hours || createdAfterLastVisit
+    }
+
+    fun isUpdatedMod(
+        lastSeenUpdatedEpochSec: Long,
+        nowEpochSec: Long = System.currentTimeMillis() / 1000L
+    ): Boolean {
+        val updated = updatedEpochSec?.takeIf { it > 0L } ?: return false
+        val newerThanSeen = lastSeenUpdatedEpochSec > 0L && updated > lastSeenUpdatedEpochSec
+        val withinLast48Hours = (nowEpochSec - updated) <= NEW_MOD_WINDOW_SECONDS &&
+            (lastSeenUpdatedEpochSec == 0L || updated > lastSeenUpdatedEpochSec)
+        return newerThanSeen || withinLast48Hours
     }
 
     companion object {

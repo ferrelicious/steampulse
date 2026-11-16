@@ -263,5 +263,131 @@ class WorkshopCheckWorkerTest {
         assertTrue(titles.any { it.contains("S.T.A.L.K.E.R. 2") })
         assertTrue(titles.any { it.contains("RimWorld") })
         assertTrue(titles.any { it.contains("2 nya moddar i 2 följda spel") })
+
+        // Verify update notification copy & rescheduling with ExistingPeriodicWorkPolicy.UPDATE
+        val updatePosted = WorkshopNotificationHelper.postNewModsNotifications(
+            context = app,
+            discoveries = listOf(
+                NewModNotificationItem(
+                    appId = 1643320,
+                    gameName = "S.T.A.L.K.E.R. 2",
+                    modTitle = "Better Ballistics",
+                    publishedFileId = "9003",
+                    isUpdate = true
+                )
+            )
+        )
+        assertTrue(updatePosted)
+        val updatedTitles = shadowManager.allNotifications.mapNotNull {
+            it.extras.getString(android.app.Notification.EXTRA_TITLE)
+        }
+        assertTrue(updatedTitles.any { it.contains("Modd uppdaterad i S.T.A.L.K.E.R. 2") })
+
+        WorkshopNotificationHelper.schedulePeriodicCheck(
+            context = app,
+            intervalHours = 6L,
+            existingPolicy = androidx.work.ExistingPeriodicWorkPolicy.UPDATE
+        )
+        val rescheduled = WorkManager.getInstance(app)
+            .getWorkInfosForUniqueWork(WorkshopNotificationHelper.WORK_NAME)
+            .get()
+        assertEquals(1, rescheduled.size)
+        assertEquals(WorkInfo.State.ENQUEUED, rescheduled.first().state)
+    }
+
+    @Test
+    fun checkAndNotify_detectsSubscribedModUpdatesAndAvoidsDuplicateAlerts() = runBlocking {
+        localStore.setActiveUserId("user_subs")
+        localStore.setNewModNotificationsEnabled("user_subs", true)
+        localStore.saveFollowedMods(
+            "user_subs",
+            listOf(
+                com.example.model.FollowedWorkshopMod(
+                    id = "3370001",
+                    userId = "user_subs",
+                    publishedFileId = "3370001",
+                    appId = 294100,
+                    gameName = "RimWorld",
+                    title = "HugLib",
+                    createdEpochSec = 1_760_000_000L,
+                    updatedEpochSec = 1_764_000_000L,
+                    source = com.example.model.WorkshopFollowSource.STEAM_SYNC
+                )
+            )
+        )
+
+        var remoteUpdatedEpoch = 1_764_000_000L
+        val fakeClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val json = """
+                    {
+                      "response": {
+                        "publishedfiledetails": [
+                          {
+                            "publishedfileid": "3370001",
+                            "result": 1,
+                            "consumer_app_id": 294100,
+                            "title": "HugLib",
+                            "time_created": 1760000000,
+                            "time_updated": $remoteUpdatedEpoch
+                          }
+                        ]
+                      }
+                    }
+                """.trimIndent()
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(json.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val repository = SteamWorkshopRepository(httpClient = fakeClient)
+        val batches = mutableListOf<List<NewModNotificationItem>>()
+
+        // 1. First run silently initializes baseline updatedEpochSec
+        val r1 = WorkshopCheckWorker.checkAndNotify(
+            context = app,
+            localStore = localStore,
+            repository = repository,
+            nowEpochSec = 1_764_500_000L,
+            notifyHandler = { batches.add(it); true }
+        )
+        assertEquals(ListenableWorker.Result.success(), r1)
+        assertTrue(batches.isEmpty())
+        assertEquals(1_764_000_000L, localStore.loadLastNotifiedModUpdatedMap("user_subs")["3370001"])
+
+        // 2. Subscribed mod gets updated remotely -> emits update notification and updates local store
+        remoteUpdatedEpoch = 1_765_200_000L
+        val r2 = WorkshopCheckWorker.checkAndNotify(
+            context = app,
+            localStore = localStore,
+            repository = repository,
+            nowEpochSec = 1_765_201_000L,
+            notifyHandler = { batches.add(it); true }
+        )
+        assertEquals(ListenableWorker.Result.success(), r2)
+        assertEquals(1, batches.size)
+        assertEquals(1, batches[0].size)
+        assertTrue(batches[0][0].isUpdate)
+        assertEquals("HugLib", batches[0][0].modTitle)
+        assertEquals("RimWorld", batches[0][0].gameName)
+        assertEquals(1_765_200_000L, localStore.loadLastNotifiedModUpdatedMap("user_subs")["3370001"])
+        assertEquals(1_765_200_000L, localStore.loadSnapshot("user_subs").followedMods.first().updatedEpochSec)
+
+        // 3. Subsequent run with same timestamp -> no duplicate notification
+        val r3 = WorkshopCheckWorker.checkAndNotify(
+            context = app,
+            localStore = localStore,
+            repository = repository,
+            nowEpochSec = 1_765_208_000L,
+            notifyHandler = { batches.add(it); true }
+        )
+        assertEquals(ListenableWorker.Result.success(), r3)
+        assertEquals(1, batches.size)
     }
 }

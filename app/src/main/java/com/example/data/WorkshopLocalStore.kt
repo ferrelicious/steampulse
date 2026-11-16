@@ -148,6 +148,20 @@ class WorkshopLocalStore(
                 setNewModNotificationsEnabled(newUserId, prefs.getBoolean(guestNotifKey, true))
             }
         }
+        val intervalKey = "${keyPrefix(newUserId)}check_interval_hours"
+        if (!prefs.contains(intervalKey)) {
+            val guestIntervalKey = "${keyPrefix("guest")}check_interval_hours"
+            if (prefs.contains(guestIntervalKey)) {
+                setCheckIntervalHours(newUserId, getCheckIntervalHours("guest"))
+            }
+        }
+        val seenMapKey = "${keyPrefix(newUserId)}seen_mod_updates_map"
+        if (!prefs.contains(seenMapKey)) {
+            val guestSeen = prefs.getString("${keyPrefix("guest")}seen_mod_updates_map", null)
+            if (!guestSeen.isNullOrBlank()) {
+                prefs.edit().putString(seenMapKey, guestSeen).apply()
+            }
+        }
     }
 
     fun getActiveUserId(): String {
@@ -170,6 +184,107 @@ class WorkshopLocalStore(
         prefs.edit()
             .putBoolean("${keyPrefix(userId)}new_mod_notifications_enabled", enabled)
             .apply()
+    }
+
+    fun getCheckIntervalHours(userId: String): Long {
+        val raw = prefs.getLong("${keyPrefix(userId)}check_interval_hours", DEFAULT_CHECK_INTERVAL_HOURS)
+        return if (raw in SUPPORTED_CHECK_INTERVAL_HOURS) raw else DEFAULT_CHECK_INTERVAL_HOURS
+    }
+
+    fun setCheckIntervalHours(userId: String, hours: Long) {
+        val sanitized = if (hours in SUPPORTED_CHECK_INTERVAL_HOURS) hours else DEFAULT_CHECK_INTERVAL_HOURS
+        prefs.edit()
+            .putLong("${keyPrefix(userId)}check_interval_hours", sanitized)
+            .apply()
+    }
+
+    fun loadSeenModUpdateMap(userId: String): Map<String, Long> {
+        return loadLongMap("${keyPrefix(userId)}seen_mod_updates_map")
+    }
+
+    fun saveModUpdateSeen(userId: String, publishedFileId: String, updatedEpochSec: Long) {
+        val id = publishedFileId.trim()
+        if (id.isBlank() || updatedEpochSec <= 0L) return
+        val current = loadSeenModUpdateMap(userId).toMutableMap()
+        val prev = current[id] ?: 0L
+        if (updatedEpochSec > prev) {
+            current[id] = updatedEpochSec
+            saveLongMap("${keyPrefix(userId)}seen_mod_updates_map", current)
+        }
+    }
+
+    fun removeSeenModUpdate(userId: String, publishedFileId: String) {
+        val id = publishedFileId.trim()
+        if (id.isBlank()) return
+        val current = loadSeenModUpdateMap(userId).toMutableMap()
+        if (current.remove(id) != null) {
+            saveLongMap("${keyPrefix(userId)}seen_mod_updates_map", current)
+        }
+    }
+
+    fun initializeModUpdateBaselinesIfMissing(
+        userId: String,
+        mods: List<FollowedWorkshopMod>,
+        previousLocalById: Map<String, FollowedWorkshopMod> = emptyMap(),
+        nowEpochSec: Long = System.currentTimeMillis() / 1000L
+    ): Map<String, Long> {
+        val current = loadSeenModUpdateMap(userId).toMutableMap()
+        var changed = false
+        mods.forEach { mod ->
+            val id = mod.publishedFileId
+            if (id.isBlank()) return@forEach
+            val existingSeen = current[id] ?: 0L
+            val prevLocalUpdated = previousLocalById[id]?.updatedEpochSec ?: 0L
+            if (existingSeen == 0L) {
+                if (prevLocalUpdated > 0L && mod.updatedEpochSec > prevLocalUpdated) {
+                    // Previously stored mod received a newer Steam update -> preserve old timestamp as seen so badge highlights it.
+                    current[id] = prevLocalUpdated
+                    changed = true
+                } else if (mod.updatedEpochSec > 0L && (nowEpochSec - mod.updatedEpochSec) > RECENT_UPDATE_WINDOW_SECONDS) {
+                    // Old mod (>48h) synced for the first time -> record baseline so only future updates highlight.
+                    current[id] = mod.updatedEpochSec
+                    changed = true
+                }
+            }
+        }
+        if (changed) {
+            saveLongMap("${keyPrefix(userId)}seen_mod_updates_map", current)
+        }
+        return current
+    }
+
+    fun loadLastNotifiedModUpdatedMap(userId: String): Map<String, Long> {
+        return loadLongMap("${keyPrefix(userId)}last_notified_mod_updates_map")
+    }
+
+    fun saveLastNotifiedModUpdatedMap(userId: String, map: Map<String, Long>) {
+        saveLongMap("${keyPrefix(userId)}last_notified_mod_updates_map", map)
+    }
+
+    private fun loadLongMap(key: String): Map<String, Long> {
+        val raw = prefs.getString(key, null).orEmpty()
+        if (raw.isBlank()) return emptyMap()
+        return runCatching {
+            val obj = JSONObject(raw)
+            buildMap {
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val v = obj.optLong(k, 0L)
+                    if (k.isNotBlank() && v > 0L) put(k, v)
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun saveLongMap(key: String, map: Map<String, Long>) {
+        val obj = JSONObject()
+        map.forEach { (k, v) ->
+            if (k.isNotBlank() && v > 0L) {
+                obj.put(k, v)
+            }
+        }
+        prefs.edit().putString(key, obj.toString()).apply()
     }
 
     fun getLastNotifiedEpochSec(userId: String, appId: Int): Long {
@@ -322,5 +437,8 @@ class WorkshopLocalStore(
         private const val KEY_IS_GUEST_MODE = "app_is_guest_mode"
         private const val KEY_ACTIVE_USER_ID = "app_active_user_id"
         private const val MAX_STORED_NOTIFIED_IDS = 80
+        const val DEFAULT_CHECK_INTERVAL_HOURS = 2L
+        val SUPPORTED_CHECK_INTERVAL_HOURS = listOf(1L, 2L, 6L, 12L)
+        private const val RECENT_UPDATE_WINDOW_SECONDS = 48L * 3600L
     }
 }

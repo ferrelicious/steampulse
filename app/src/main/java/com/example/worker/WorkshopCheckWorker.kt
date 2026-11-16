@@ -47,15 +47,19 @@ class WorkshopCheckWorker(
                 return Result.success()
             }
 
-            val followedGames = localStore.loadSnapshot(userKey).followedGames
-            if (followedGames.isEmpty()) {
+            val snapshot = localStore.loadSnapshot(userKey)
+            val followedGames = snapshot.followedGames
+            val followedMods = snapshot.followedMods
+            if (followedGames.isEmpty() && followedMods.isEmpty()) {
                 return Result.success()
             }
 
             val discoveries = mutableListOf<NewModNotificationItem>()
             var networkFailures = 0
+            var totalRequests = 0
 
             for (game in followedGames) {
+                totalRequests++
                 val mods = try {
                     repository.fetchWorkshopMods(
                         appId = game.appId,
@@ -99,7 +103,8 @@ class WorkshopCheckWorker(
                                 appId = game.appId,
                                 gameName = gameLabel,
                                 modTitle = mod.title,
-                                publishedFileId = mod.publishedFileId
+                                publishedFileId = mod.publishedFileId,
+                                isUpdate = false
                             )
                         )
                     }
@@ -116,11 +121,76 @@ class WorkshopCheckWorker(
                 }
             }
 
+            if (followedMods.isNotEmpty()) {
+                totalRequests++
+                val modIds = followedMods.map { it.publishedFileId }.distinct().take(100)
+                val detailsMap = try {
+                    repository.fetchPublishedFileDetails(modIds)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed checking updates for subscribed mods", e)
+                    networkFailures++
+                    emptyMap()
+                }
+
+                if (detailsMap.isNotEmpty()) {
+                    val notifiedUpdates = localStore.loadLastNotifiedModUpdatedMap(userKey).toMutableMap()
+                    var updatesChanged = false
+                    var localModsUpdated = false
+
+                    val refreshedMods = followedMods.map { localMod ->
+                        val remote = detailsMap[localMod.publishedFileId] ?: return@map localMod
+                        val remoteUpdated = remote.updatedEpochSec ?: 0L
+                        val previousNotified = notifiedUpdates[localMod.publishedFileId] ?: 0L
+
+                        if (previousNotified == 0L) {
+                            // First background check for this subscribed mod: initialize silently.
+                            val baseline = maxOf(remoteUpdated, localMod.updatedEpochSec)
+                            if (baseline > 0L) {
+                                notifiedUpdates[localMod.publishedFileId] = baseline
+                                updatesChanged = true
+                            }
+                        } else if (remoteUpdated > previousNotified) {
+                            discoveries.add(
+                                NewModNotificationItem(
+                                    appId = localMod.appId.takeIf { it > 0 } ?: remote.appId,
+                                    gameName = localMod.gameName.ifBlank { "Steam Workshop" },
+                                    modTitle = remote.title.ifBlank { localMod.title },
+                                    publishedFileId = localMod.publishedFileId,
+                                    isUpdate = true
+                                )
+                            )
+                            notifiedUpdates[localMod.publishedFileId] = remoteUpdated
+                            updatesChanged = true
+                        }
+
+                        if (remoteUpdated > localMod.updatedEpochSec) {
+                            localModsUpdated = true
+                            localMod.copy(
+                                updatedEpochSec = remoteUpdated,
+                                createdEpochSec = localMod.createdEpochSec.takeIf { it > 0L }
+                                    ?: (remote.createdEpochSec ?: 0L)
+                            )
+                        } else {
+                            localMod
+                        }
+                    }
+
+                    if (updatesChanged) {
+                        localStore.saveLastNotifiedModUpdatedMap(userKey, notifiedUpdates)
+                    }
+                    if (localModsUpdated) {
+                        localStore.saveFollowedMods(userKey, refreshedMods)
+                    }
+                }
+            }
+
             if (discoveries.isNotEmpty()) {
                 notifyHandler(discoveries)
             }
 
-            return if (networkFailures == followedGames.size && runAttemptCount < MAX_RETRY_ATTEMPTS) {
+            return if (totalRequests > 0 && networkFailures == totalRequests && runAttemptCount < MAX_RETRY_ATTEMPTS) {
                 Result.retry()
             } else {
                 Result.success()

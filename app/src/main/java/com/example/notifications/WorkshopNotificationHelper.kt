@@ -25,7 +25,8 @@ data class NewModNotificationItem(
     val appId: Int,
     val gameName: String,
     val modTitle: String,
-    val publishedFileId: String
+    val publishedFileId: String,
+    val isUpdate: Boolean = false
 )
 
 object WorkshopNotificationHelper {
@@ -67,18 +68,23 @@ object WorkshopNotificationHelper {
         }
     }
 
-    fun schedulePeriodicCheck(context: Context) {
+    fun schedulePeriodicCheck(
+        context: Context,
+        intervalHours: Long = 2L,
+        existingPolicy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP
+    ) {
+        val safeHours = intervalHours.coerceIn(1L, 24L)
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        val request = PeriodicWorkRequestBuilder<WorkshopCheckWorker>(2, TimeUnit.HOURS)
+        val request = PeriodicWorkRequestBuilder<WorkshopCheckWorker>(safeHours, TimeUnit.HOURS)
             .setConstraints(constraints)
             .build()
 
         WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(
             WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            existingPolicy,
             request
         )
     }
@@ -114,14 +120,21 @@ object WorkshopNotificationHelper {
         val shown = discoveries.take(5)
 
         shown.forEach { item ->
-            val notificationId = BASE_MOD_NOTIFICATION_ID + (item.publishedFileId.hashCode() and 0x0FFF)
+            val notificationId = BASE_MOD_NOTIFICATION_ID +
+                ("${item.publishedFileId}_${item.isUpdate}".hashCode() and 0x0FFF)
+            val titlePrefix = if (item.isUpdate) "Modd uppdaterad i" else "Ny modd i"
+            val bodyText = if (item.isUpdate) {
+                "${item.modTitle} har uppdaterats för ${item.gameName} på Steam Workshop."
+            } else {
+                "${item.modTitle} laddades upp till ${item.gameName} på Steam Workshop."
+            }
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification_workshop)
-                .setContentTitle("Ny modd i ${item.gameName}")
+                .setContentTitle("$titlePrefix ${item.gameName}")
                 .setContentText(item.modTitle)
                 .setStyle(
                     NotificationCompat.BigTextStyle()
-                        .bigText("${item.modTitle} laddades upp till ${item.gameName} på Steam Workshop.")
+                        .bigText(bodyText)
                 )
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setContentIntent(pendingIntent)
@@ -139,16 +152,24 @@ object WorkshopNotificationHelper {
         }
 
         if (discoveries.size > 1) {
+            val newCount = discoveries.count { !it.isUpdate }
+            val updateCount = discoveries.count { it.isUpdate }
             val gamesCount = discoveries.map { it.appId }.distinct().size
-            val summaryText = if (gamesCount > 1) {
-                "${discoveries.size} nya moddar i $gamesCount följda spel"
-            } else {
-                "${discoveries.size} nya moddar i ${discoveries.first().gameName}"
+            val summaryText = when {
+                updateCount > 0 && newCount > 0 ->
+                    "$newCount nya & $updateCount uppdaterade Workshop-moddar"
+                updateCount > 0 ->
+                    "$updateCount uppdaterade Workshop-moddar"
+                gamesCount > 1 ->
+                    "${discoveries.size} nya moddar i $gamesCount följda spel"
+                else ->
+                    "${discoveries.size} nya moddar i ${discoveries.first().gameName}"
             }
             val inboxStyle = NotificationCompat.InboxStyle()
                 .setBigContentTitle(summaryText)
             discoveries.take(5).forEach { item ->
-                inboxStyle.addLine("${item.gameName}: ${item.modTitle}")
+                val tag = if (item.isUpdate) "Uppdaterad" else "Ny"
+                inboxStyle.addLine("[$tag] ${item.gameName}: ${item.modTitle}")
             }
 
             val summary = NotificationCompat.Builder(context, CHANNEL_ID)

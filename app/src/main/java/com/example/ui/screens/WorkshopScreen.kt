@@ -88,8 +88,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.work.ExistingPeriodicWorkPolicy
 import coil.compose.AsyncImage
 import com.example.data.SteamGamesCatalog
+import com.example.model.FollowedModsFilterMode
 import com.example.model.WorkshopGameSummary
 import com.example.model.WorkshopGamesUiState
 import com.example.model.WorkshopLeaderboardMode
@@ -154,7 +156,10 @@ fun WorkshopScreen(
     onLogoutSteamSession: () -> Unit = {},
     onWorkshopVisited: () -> Unit = {},
     onSetNewModNotificationsEnabled: (Boolean) -> Unit = {},
-    onShowNotificationFeedback: (String) -> Unit = {}
+    onShowNotificationFeedback: (String) -> Unit = {},
+    onSelectCheckIntervalHours: (Long) -> Unit = {},
+    onSelectFollowedModsFilter: (FollowedModsFilterMode) -> Unit = {},
+    onMarkModUpdateSeen: (WorkshopModItem) -> Unit = {}
 ) {
     val context = LocalContext.current
     var hasNotificationPermission by remember {
@@ -171,14 +176,24 @@ fun WorkshopScreen(
         pendingNotificationAction = null
         if (granted) {
             onSetNewModNotificationsEnabled(true)
-            WorkshopNotificationHelper.schedulePeriodicCheck(context)
+            WorkshopNotificationHelper.schedulePeriodicCheck(
+                context = context,
+                intervalHours = uiState.checkIntervalHours,
+                existingPolicy = ExistingPeriodicWorkPolicy.KEEP
+            )
             when (action) {
                 PendingNotificationAction.TEST_NOTIFICATION -> {
                     WorkshopNotificationHelper.postTestNotification(context)
                     onShowNotificationFeedback("Testnotis skickad!")
                 }
                 PendingNotificationAction.ENABLE_SWITCH -> {
-                    onShowNotificationFeedback("Notiser aktiverade – kontrollerar var 2:a timme")
+                    onShowNotificationFeedback(
+                        if (uiState.checkIntervalHours == 1L) {
+                            "Notiser aktiverade – kontrollerar varje timme"
+                        } else {
+                            "Notiser aktiverade – kontrollerar var ${uiState.checkIntervalHours}:e timme"
+                        }
+                    )
                 }
                 null -> Unit
             }
@@ -200,9 +215,13 @@ fun WorkshopScreen(
         }
     }
 
-    LaunchedEffect(uiState.newModNotificationsEnabled, hasNotificationPermission) {
+    LaunchedEffect(uiState.newModNotificationsEnabled, hasNotificationPermission, uiState.checkIntervalHours) {
         if (uiState.newModNotificationsEnabled && hasNotificationPermission) {
-            WorkshopNotificationHelper.schedulePeriodicCheck(context)
+            WorkshopNotificationHelper.schedulePeriodicCheck(
+                context = context,
+                intervalHours = uiState.checkIntervalHours,
+                existingPolicy = ExistingPeriodicWorkPolicy.KEEP
+            )
         } else if (!uiState.newModNotificationsEnabled) {
             WorkshopNotificationHelper.cancelPeriodicCheck(context)
         }
@@ -218,12 +237,40 @@ fun WorkshopScreen(
             hasNotificationPermission = permGranted
             if (permGranted) {
                 onSetNewModNotificationsEnabled(true)
-                WorkshopNotificationHelper.schedulePeriodicCheck(context)
-                onShowNotificationFeedback("Notiser aktiverade – kontrollerar var 2:a timme")
+                WorkshopNotificationHelper.schedulePeriodicCheck(
+                    context = context,
+                    intervalHours = uiState.checkIntervalHours,
+                    existingPolicy = ExistingPeriodicWorkPolicy.KEEP
+                )
+                onShowNotificationFeedback(
+                    if (uiState.checkIntervalHours == 1L) {
+                        "Notiser aktiverade – kontrollerar varje timme"
+                    } else {
+                        "Notiser aktiverade – kontrollerar var ${uiState.checkIntervalHours}:e timme"
+                    }
+                )
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 pendingNotificationAction = PendingNotificationAction.ENABLE_SWITCH
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
+        }
+    }
+
+    val handleSelectCheckInterval: (Long) -> Unit = { hours ->
+        onSelectCheckIntervalHours(hours)
+        if (uiState.newModNotificationsEnabled && hasNotificationPermission) {
+            WorkshopNotificationHelper.schedulePeriodicCheck(
+                context = context,
+                intervalHours = hours,
+                existingPolicy = ExistingPeriodicWorkPolicy.UPDATE
+            )
+            onShowNotificationFeedback(
+                if (hours == 1L) {
+                    "Kontrollintervall uppdaterat: varje timme"
+                } else {
+                    "Kontrollintervall uppdaterat: var ${hours}:e timme"
+                }
+            )
         }
     }
 
@@ -249,6 +296,7 @@ fun WorkshopScreen(
         }
     }
     val openModInSteam: (WorkshopModItem) -> Unit = { mod ->
+        onMarkModUpdateSeen(mod)
         SteamDeepLinkHelper.openWorkshopModInSteam(
             context = context,
             publishedFileId = mod.publishedFileId,
@@ -282,7 +330,9 @@ fun WorkshopScreen(
                     isNewModNotificationsActive = uiState.newModNotificationsEnabled && hasNotificationPermission,
                     hasNotificationPermission = hasNotificationPermission,
                     onToggleNewModNotifications = handleToggleNewModNotifications,
+                    onSelectCheckIntervalHours = handleSelectCheckInterval,
                     onTestNotification = handleTestNotification,
+                    onSelectFollowedModsFilter = onSelectFollowedModsFilter,
                     onOpenGameWorkshop = onOpenGameWorkshop,
                     onToggleFollowGame = onToggleFollowGame,
                     onRefreshFollowedFeed = onRefreshFollowedFeed,
@@ -1776,6 +1826,28 @@ internal fun ModNewBadgePill(
     ) {
         Text(
             text = "NY",
+            fontFamily = JetBrainsMonoFontFamily,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+            softWrap = false,
+            color = Color(0xFF020617),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+internal fun ModUpdatedBadgePill(
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = SteamAmber,
+        shape = RoundedCornerShape(6.dp),
+        modifier = modifier
+    ) {
+        Text(
+            text = "UPPDATERAD",
             fontFamily = JetBrainsMonoFontFamily,
             fontSize = 10.sp,
             fontWeight = FontWeight.ExtraBold,

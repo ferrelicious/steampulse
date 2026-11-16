@@ -314,14 +314,27 @@ class SteamWorkshopRepository(
                 ?.replace(",", "")?.replace(" ", "")?.toLongOrNull()
             val createdFromHtml = DETAIL_POSTED_DATE_REGEX.find(html)?.groupValues?.getOrNull(1)
                 ?.let { parseSteamCommunityDateEpochSec(cleanHtmlText(it)) }
+            val updatedFromHtml = DETAIL_UPDATED_DATE_REGEX.find(html)?.groupValues?.getOrNull(1)
+                ?.let { parseSteamCommunityDateEpochSec(cleanHtmlText(it)) }
 
             item.copy(
                 description = desc.ifBlank { item.description },
                 subscriptions = subscribers ?: item.subscriptions,
-                createdEpochSec = item.createdEpochSec ?: createdFromHtml
+                createdEpochSec = item.createdEpochSec ?: createdFromHtml,
+                updatedEpochSec = item.updatedEpochSec ?: updatedFromHtml
             )
         }.getOrDefault(item)
     }
+
+    suspend fun fetchPublishedFileDetails(ids: List<String>): Map<String, WorkshopModItem> =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) return@withContext emptyMap()
+            val result = mutableMapOf<String, WorkshopModItem>()
+            ids.distinct().chunked(50).forEach { chunk ->
+                result.putAll(fetchPublishedFileDetailsSafe(chunk))
+            }
+            result
+        }
 
     private fun fetchPublishedFileDetailsSafe(ids: List<String>): Map<String, WorkshopModItem> {
         if (ids.isEmpty()) return emptyMap()
@@ -755,12 +768,21 @@ class SteamWorkshopRepository(
         )
         private val ANY_IMG_TAG_REGEX = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
         private val DATA_TIMESTAMP_ATTR_REGEX = Regex("""\bdata-(?:time-created|timestamp)\s*=\s*['"](\d{9,12})['"]""", RegexOption.IGNORE_CASE)
+        private val DATA_UPDATED_ATTR_REGEX = Regex("""\bdata-time-updated\s*=\s*['"](\d{9,12})['"]""", RegexOption.IGNORE_CASE)
         private val CONTAINER_DATE_REGEX = Regex(
             """<(div|span)\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopBrowseRowDate|workshopItemDate|workshopItemCreated|fileDetailsCreated)\b[^'"]*['"][^>]*>(.*?)</\1>""",
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
+        private val CONTAINER_UPDATED_DATE_REGEX = Regex(
+            """<(div|span)\b[^>]*class\s*=\s*['"][^'"]*\b(?:workshopItemUpdated|workshopBrowseRowUpdated|fileDetailsUpdated)\b[^'"]*['"][^>]*>(.*?)</\1>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
         private val DETAIL_POSTED_DATE_REGEX = Regex(
             """<div\b[^>]*class\s*=\s*['"][^'"]*\bdetailsStatLeft\b[^'"]*['"][^>]*>\s*(?:Posted|Skapad|Upplagd)\s*</div>\s*<div\b[^>]*class\s*=\s*['"][^'"]*\bdetailsStatRight\b[^'"]*['"][^>]*>(.*?)</div>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        )
+        private val DETAIL_UPDATED_DATE_REGEX = Regex(
+            """<div\b[^>]*class\s*=\s*['"][^'"]*\bdetailsStatLeft\b[^'"]*['"][^>]*>\s*(?:Updated|Uppdaterad)\s*</div>\s*<div\b[^>]*class\s*=\s*['"][^'"]*\bdetailsStatRight\b[^'"]*['"][^>]*>(.*?)</div>""",
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         private val DETAIL_DESC_REGEX = Regex("""id="highlightContent"[^>]*>(.*?)</div>\s*</div>""", RegexOption.DOT_MATCHES_ALL)
@@ -1023,7 +1045,8 @@ class SteamWorkshopRepository(
                 previewUrl: String = "",
                 ratingUrl: String = "",
                 description: String = "",
-                createdEpochSec: Long? = null
+                createdEpochSec: Long? = null,
+                updatedEpochSec: Long? = null
             ) {
                 if (id.isBlank()) return
                 val cleanTitle = title.trim()
@@ -1032,6 +1055,7 @@ class SteamWorkshopRepository(
                 val cleanRating = ratingUrl.trim()
                 val cleanDesc = description.trim()
                 val validCreated = createdEpochSec?.takeIf { it > 0L }
+                val validUpdated = updatedEpochSec?.takeIf { it > 0L }
 
                 val existing = byId[id]
                 if (existing == null) {
@@ -1044,6 +1068,7 @@ class SteamWorkshopRepository(
                         itemUrl = "https://steamcommunity.com/sharedfiles/filedetails/?id=$id",
                         ratingStarsUrl = cleanRating,
                         createdEpochSec = validCreated,
+                        updatedEpochSec = validUpdated,
                         description = cleanDesc
                     )
                 } else {
@@ -1063,6 +1088,7 @@ class SteamWorkshopRepository(
                         previewUrl = existing.previewUrl.ifBlank { cleanPreview },
                         ratingStarsUrl = existing.ratingStarsUrl.ifBlank { cleanRating },
                         createdEpochSec = existing.createdEpochSec ?: validCreated,
+                        updatedEpochSec = existing.updatedEpochSec ?: validUpdated,
                         description = existing.description.ifBlank { cleanDesc }
                     )
                 }
@@ -1121,6 +1147,10 @@ class SteamWorkshopRepository(
                         ?: CONTAINER_DATE_REGEX.find(window)?.groupValues?.getOrNull(2)?.let {
                             parseSteamCommunityDateEpochSec(cleanHtmlText(it))
                         }
+                    val containerUpdatedSec = DATA_UPDATED_ATTR_REGEX.find(window)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                        ?: CONTAINER_UPDATED_DATE_REGEX.find(window)?.groupValues?.getOrNull(2)?.let {
+                            parseSteamCommunityDateEpochSec(cleanHtmlText(it))
+                        }
 
                     mergeItem(
                         id = id,
@@ -1128,7 +1158,8 @@ class SteamWorkshopRepository(
                         author = author,
                         previewUrl = previewUrl,
                         ratingUrl = ratingUrl,
-                        createdEpochSec = containerCreatedSec
+                        createdEpochSec = containerCreatedSec,
+                        updatedEpochSec = containerUpdatedSec
                     )
                 }
             }
@@ -1143,12 +1174,14 @@ class SteamWorkshopRepository(
                     val hoverDesc = cleanBbCodeAndHtml(obj.optString("description", ""))
                     val hoverAuthor = cleanHtmlText(obj.optString("author", ""))
                     val hoverCreated = obj.optLong("time_created", 0L).takeIf { it > 0L }
+                    val hoverUpdated = obj.optLong("time_updated", 0L).takeIf { it > 0L }
                     mergeItem(
                         id = id,
                         title = hoverTitle,
                         author = hoverAuthor,
                         description = hoverDesc,
-                        createdEpochSec = hoverCreated
+                        createdEpochSec = hoverCreated,
+                        updatedEpochSec = hoverUpdated
                     )
                 }.onFailure {
                     mergeItem(id = id)
@@ -1211,7 +1244,7 @@ class SteamWorkshopRepository(
             referenceNowSec: Long = System.currentTimeMillis() / 1000L
         ): Long? {
             val cleaned = rawDateText.trim()
-                .replace(Regex("""^(?:Posted|Created|Skapad|Upplagd)\s*:?\s*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""^(?:Posted|Created|Updated|Skapad|Upplagd|Uppdaterad)\s*:?\s*""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""\s+"""), " ")
                 .trim()
             if (cleaned.isBlank()) return null

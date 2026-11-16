@@ -179,6 +179,63 @@ class WorkshopLocalStoreTest {
         store.migrateGuestDataIfEmpty("user_fresh")
         assertFalse(store.isNewModNotificationsEnabled("user_fresh"))
     }
+
+    @Test
+    fun checkIntervalHours_andSeenModUpdates_persistSanitizeAndMigrate() {
+        // Default interval is 2 hours; invalid values sanitize back to default
+        assertEquals(2L, store.getCheckIntervalHours("u_interval"))
+        store.setCheckIntervalHours("u_interval", 6L)
+        assertEquals(6L, store.getCheckIntervalHours("u_interval"))
+        store.setCheckIntervalHours("u_interval", 99L)
+        assertEquals(2L, store.getCheckIntervalHours("u_interval"))
+
+        val now = 1_765_000_000L
+        val oldMod = FollowedWorkshopMod(
+            id = "old_mod",
+            userId = "u_interval",
+            publishedFileId = "old_mod",
+            appId = 1643320,
+            title = "Old Stable Mod",
+            updatedEpochSec = now - (100L * 3600L)
+        )
+        val recentMod = FollowedWorkshopMod(
+            id = "recent_mod",
+            userId = "u_interval",
+            publishedFileId = "recent_mod",
+            appId = 1643320,
+            title = "Recently Patched Mod",
+            updatedEpochSec = now - (5L * 3600L)
+        )
+
+        // Old mod (>48h) gets silently baselined; recent mod (<48h) stays un-seen so UPPDATERAD shows
+        store.initializeModUpdateBaselinesIfMissing(
+            userId = "u_interval",
+            mods = listOf(oldMod, recentMod),
+            nowEpochSec = now
+        )
+        val seenMapAfterInit = store.loadSeenModUpdateMap("u_interval")
+        assertEquals(oldMod.updatedEpochSec, seenMapAfterInit["old_mod"])
+        assertFalse(seenMapAfterInit.containsKey("recent_mod"))
+        assertFalse(oldMod.toModItem().isUpdatedMod(seenMapAfterInit["old_mod"] ?: 0L, now))
+        assertTrue(recentMod.toModItem().isUpdatedMod(seenMapAfterInit["recent_mod"] ?: 0L, now))
+
+        // Mark recent mod as seen
+        store.saveModUpdateSeen("u_interval", "recent_mod", recentMod.updatedEpochSec!!)
+        val seenAfterMark = store.loadSeenModUpdateMap("u_interval")
+        assertEquals(recentMod.updatedEpochSec, seenAfterMark["recent_mod"])
+        assertFalse(recentMod.toModItem().isUpdatedMod(seenAfterMark["recent_mod"] ?: 0L, now))
+
+        // Last notified mod updates map round-trip
+        store.saveLastNotifiedModUpdatedMap("u_interval", mapOf("old_mod" to 1_764_000_000L))
+        assertEquals(1_764_000_000L, store.loadLastNotifiedModUpdatedMap("u_interval")["old_mod"])
+
+        // Guest interval and seen updates migrate to new user
+        store.setCheckIntervalHours("guest", 12L)
+        store.saveModUpdateSeen("guest", "guest_mod_1", 1_765_123_456L)
+        store.migrateGuestDataIfEmpty("u_migrated_interval")
+        assertEquals(12L, store.getCheckIntervalHours("u_migrated_interval"))
+        assertEquals(1_765_123_456L, store.loadSeenModUpdateMap("u_migrated_interval")["guest_mod_1"])
+    }
 }
 
 

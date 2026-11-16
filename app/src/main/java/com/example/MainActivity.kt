@@ -659,7 +659,10 @@ private fun AuthenticatedAppShell(
                                     onLogoutSteamSession = workshopViewModel::logoutSteamSession,
                                     onWorkshopVisited = workshopViewModel::markWorkshopVisited,
                                     onSetNewModNotificationsEnabled = workshopViewModel::setNewModNotificationsEnabled,
-                                    onShowNotificationFeedback = workshopViewModel::emitToast
+                                    onShowNotificationFeedback = workshopViewModel::emitToast,
+                                    onSelectCheckIntervalHours = workshopViewModel::selectCheckIntervalHours,
+                                    onSelectFollowedModsFilter = workshopViewModel::selectFollowedModsFilter,
+                                    onMarkModUpdateSeen = workshopViewModel::markModUpdateSeen
                                 )
 
                                 AppTab.WATCHLIST -> WatchlistScreen(
