@@ -107,7 +107,7 @@ import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.rememberAppUpdateCoordinator
 import com.example.ui.screens.AiChatScreen
 import com.example.ui.screens.AuthScreen
-import com.example.ui.screens.ImageStudioScreen
+import com.example.ui.screens.PulseCardStudioScreen
 import com.example.ui.screens.PulseDealsScreen
 import com.example.ui.screens.ReleaseScreen
 import com.example.ui.screens.SettingsScreen
@@ -125,7 +125,7 @@ import com.example.ui.theme.SteamSurface
 import com.example.ui.theme.SteamTextPrimary
 import com.example.ui.theme.SteamTextSecondary
 import com.example.viewmodel.AiChatViewModel
-import com.example.viewmodel.ImageStudioViewModel
+import com.example.viewmodel.PulseCardStudioViewModel
 import com.example.viewmodel.ReleaseViewModel
 import com.example.viewmodel.SteamPulseViewModel
 import com.example.viewmodel.WatchlistUiState
@@ -293,7 +293,7 @@ private fun AuthenticatedAppShell(
         }
     )
     val aiChatViewModel: AiChatViewModel = viewModel(key = "chat_$currentUserId")
-    val imageStudioViewModel: ImageStudioViewModel = viewModel(key = "studio_$currentUserId")
+    val pulseCardStudioViewModel: PulseCardStudioViewModel = viewModel(key = "pulse_card_studio_$currentUserId")
     val releaseViewModel: ReleaseViewModel = viewModel(
         key = "releases",
         factory = viewModelFactory {
@@ -667,8 +667,11 @@ private fun AuthenticatedAppShell(
                                     onConsumeInitialPrompt = { pendingAiPrompt = null }
                                 )
 
-                                AppTab.IMAGE_STUDIO -> ImageStudioScreen(
-                                    viewModel = imageStudioViewModel
+                                AppTab.IMAGE_STUDIO -> PulseCardStudioScreen(
+                                    viewModel = pulseCardStudioViewModel,
+                                    onShowMessage = { msg ->
+                                        scope.launch { snackbarHostState.showSnackbar(msg) }
+                                    }
                                 )
                             }
                         }
