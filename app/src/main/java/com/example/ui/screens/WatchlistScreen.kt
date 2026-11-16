@@ -35,7 +35,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +45,7 @@ import com.example.data.SteamGamesCatalog
 import com.example.model.CurrencyMode
 import com.example.model.SteamGame
 import com.example.model.WatchlistItem
+import com.example.ui.components.SteamGameArtBadge
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
 import com.example.ui.theme.SteamAmber
@@ -218,26 +218,16 @@ private fun WatchlistItemCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            if (game != null) {
-                                Brush.linearGradient(listOf(game.gradientStart, game.gradientEnd))
-                            } else {
-                                Brush.linearGradient(listOf(SteamCard, SteamBorder))
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = game?.shortCode ?: item.id.take(4).uppercase(),
-                        color = Color.White,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 11.sp
-                    )
-                }
+                SteamGameArtBadge(
+                    appId = game?.appId ?: 0,
+                    title = item.gameTitle,
+                    shortCode = game?.shortCode ?: item.id.take(4).uppercase(),
+                    gradientStart = game?.gradientStart ?: SteamCard,
+                    gradientEnd = game?.gradientEnd ?: SteamBorder,
+                    width = 64.dp,
+                    height = 40.dp,
+                    cornerRadius = 10.dp
+                )
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(

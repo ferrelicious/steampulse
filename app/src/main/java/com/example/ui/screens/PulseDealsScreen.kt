@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -26,8 +27,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.LocalOffer
@@ -64,7 +65,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -72,6 +72,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.SteamGamesCatalog
@@ -82,6 +83,7 @@ import com.example.model.SortOrder
 import com.example.model.SteamGame
 import com.example.model.WatchlistItem
 import com.example.ui.components.GameCardRow
+import com.example.ui.components.SteamGameArtBadge
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
 import com.example.ui.theme.SteamAmber
@@ -119,7 +121,7 @@ fun PulseDealsScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Live Platform Telemetry Banner
@@ -128,7 +130,9 @@ fun PulseDealsScreen(
                 colors = CardDefaults.cardColors(containerColor = SteamSurface),
                 border = BorderStroke(1.dp, SteamBorder),
                 shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -188,32 +192,27 @@ fun PulseDealsScreen(
             }
         }
 
-        // Highlight Cards Strip
+        // Highlight Cards Strip (edge-to-edge LazyRow with 16.dp contentPadding so cards never clip awkwardly)
         item(key = "hero_highlights") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                val cs2 = uiState.games.firstOrNull { it.id == "cs2" }
-                HeroHighlightCard(
+            val cs2 = uiState.games.firstOrNull { it.id == "cs2" }
+            val highlightCards = listOf(
+                HighlightBannerData(
                     eyebrow = "MEST SPELADE IDAG",
                     title = "Counter-Strike 2",
                     subtitle = "${SteamGamesCatalog.formatNumber(cs2?.playersNow ?: 1482910)} aktiva spelare",
                     accent = SteamAccent,
                     icon = Icons.Rounded.NotificationsActive,
                     onClick = { onOpenGameDetail("cs2") }
-                )
-                HeroHighlightCard(
+                ),
+                HighlightBannerData(
                     eyebrow = "HETASTE RELEASES 2026",
                     title = "Phantom Blade Zero",
                     subtitle = "Jämför nycklar upp till -36%",
                     accent = SteamNeon,
                     icon = Icons.Rounded.LocalFireDepartment,
                     onClick = { onOpenGameDetail("phantom-blade-zero") }
-                )
-                HeroHighlightCard(
+                ),
+                HighlightBannerData(
                     eyebrow = "PRISGARANTI & TRANSPARENS",
                     title = "Officiella & Keyshops",
                     subtitle = "Steam, CDKeys, Eneba, G2A & Fanatical",
@@ -221,20 +220,42 @@ fun PulseDealsScreen(
                     icon = Icons.Rounded.Shield,
                     onClick = { onCategorySelect(GameCategory.DEALS) }
                 )
+            )
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(highlightCards, key = { it.eyebrow }) { card ->
+                    HeroHighlightCard(
+                        eyebrow = card.eyebrow,
+                        title = card.title,
+                        subtitle = card.subtitle,
+                        accent = card.accent,
+                        icon = card.icon,
+                        onClick = card.onClick
+                    )
+                }
             }
         }
 
         // Search, Sort & Category Filter Controls
         item(key = "search_and_filters") {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
                     value = uiState.searchQuery,
                     onValueChange = onSearchChange,
                     placeholder = {
                         Text(
-                            "Sök speltitel (t.ex. CS2, Monster Hunter, Rust)...",
+                            text = "Sök speltitel (t.ex. CS2, Rust)...",
                             color = SteamTextSecondary,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
                     leadingIcon = {
@@ -248,10 +269,12 @@ fun PulseDealsScreen(
                         if (uiState.searchQuery.isNotEmpty()) {
                             IconButton(
                                 onClick = { onSearchChange("") },
-                                modifier = Modifier.minimumInteractiveComponentSize()
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("clear_search_button")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.Close,
+                                    imageVector = Icons.Default.Close,
                                     contentDescription = "Rensa sökning",
                                     tint = SteamTextSecondary
                                 )
@@ -259,6 +282,7 @@ fun PulseDealsScreen(
                         }
                     },
                     singleLine = true,
+                    maxLines = 1,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = SteamAccent,
                         unfocusedBorderColor = SteamBorder,
@@ -384,7 +408,9 @@ fun PulseDealsScreen(
                     colors = CardDefaults.cardColors(containerColor = SteamSurface),
                     border = BorderStroke(1.dp, SteamBorder),
                     shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                 ) {
                     Column(
                         modifier = Modifier
@@ -426,12 +452,14 @@ fun PulseDealsScreen(
             }
         } else {
             items(uiState.games, key = { it.id }) { game ->
-                GameCardRow(
-                    game = game,
-                    currency = uiState.currency,
-                    isWatched = watchedIds.contains(game.id),
-                    onClick = { onOpenGameDetail(game.id) }
-                )
+                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    GameCardRow(
+                        game = game,
+                        currency = uiState.currency,
+                        isWatched = watchedIds.contains(game.id),
+                        onClick = { onOpenGameDetail(game.id) }
+                    )
+                }
             }
         }
     }
@@ -457,6 +485,15 @@ fun PulseDealsScreen(
     }
 }
 
+private data class HighlightBannerData(
+    val eyebrow: String,
+    val title: String,
+    val subtitle: String,
+    val accent: Color,
+    val icon: ImageVector,
+    val onClick: () -> Unit
+)
+
 @Composable
 private fun HeroHighlightCard(
     eyebrow: String,
@@ -471,12 +508,12 @@ private fun HeroHighlightCard(
         colors = CardDefaults.cardColors(containerColor = SteamCard),
         border = BorderStroke(1.dp, SteamBorder),
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.width(248.dp)
+        modifier = Modifier.width(240.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -484,23 +521,32 @@ private fun HeroHighlightCard(
                 Text(
                     text = eyebrow,
                     style = MaterialTheme.typography.labelSmall,
-                    color = accent
+                    color = accent,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = SteamTextPrimary
+                    color = SteamTextPrimary,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = SteamTextSecondary,
-                    fontSize = 11.sp
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -567,20 +613,16 @@ private fun GameDetailModalSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Brush.linearGradient(listOf(game.gradientStart, game.gradientEnd))),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = game.shortCode,
-                        color = Color.White,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp
-                    )
-                }
+                SteamGameArtBadge(
+                    appId = game.appId,
+                    title = game.title,
+                    shortCode = game.shortCode,
+                    gradientStart = game.gradientStart,
+                    gradientEnd = game.gradientEnd,
+                    width = 76.dp,
+                    height = 48.dp,
+                    cornerRadius = 12.dp
+                )
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(

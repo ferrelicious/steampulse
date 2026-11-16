@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
@@ -40,7 +41,10 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -207,6 +211,8 @@ fun AppNavigation(
             AuthenticatedAppShell(
                 currentUserId = effectiveUid,
                 isGuest = user == null,
+                userDisplayName = user?.displayName,
+                userEmail = user?.email,
                 launchIntent = launchIntent,
                 onConsumeLaunchIntent = onConsumeLaunchIntent,
                 onNavigateToLogin = {
@@ -223,6 +229,8 @@ fun AppNavigation(
 private fun AuthenticatedAppShell(
     currentUserId: String,
     isGuest: Boolean = false,
+    userDisplayName: String? = null,
+    userEmail: String? = null,
     launchIntent: Intent? = null,
     onConsumeLaunchIntent: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {}
@@ -322,179 +330,16 @@ private fun AuthenticatedAppShell(
         contentWindowInsets = WindowInsets.safeDrawing,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = SteamSurface,
-                    titleContentColor = SteamTextPrimary
-                ),
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(Brush.linearGradient(listOf(SteamAccent, SteamNeon))),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Bolt,
-                                contentDescription = null,
-                                tint = Color(0xFF020617),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "SteamPulse",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontSize = 16.sp,
-                                color = SteamTextPrimary,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "& DEALS 2026",
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontSize = 9.sp,
-                                color = SteamAccent,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    // GitHub Releases / App Update Pill Button
-                    Surface(
-                        onClick = { showReleasePage = !showReleasePage },
-                        color = if (showReleasePage || releaseState.hasUpdateAvailable) {
-                            SteamNeon.copy(alpha = 0.16f)
-                        } else {
-                            SteamBg
-                        },
-                        shape = RoundedCornerShape(9.dp),
-                        border = BorderStroke(
-                            1.dp,
-                            if (showReleasePage || releaseState.hasUpdateAvailable) SteamNeon else SteamBorder
-                        ),
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .minimumInteractiveComponentSize()
-                            .testTag("open_releases_button")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SystemUpdate,
-                                contentDescription = androidx.compose.ui.res.stringResource(R.string.release_open_button_desc),
-                                tint = if (releaseState.hasUpdateAvailable || showReleasePage) SteamNeon else SteamAccent,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = if (releaseState.hasUpdateAvailable) "Uppdatera" else "v${BuildConfig.VERSION_NAME}",
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                softWrap = false,
-                                color = if (releaseState.hasUpdateAvailable || showReleasePage) SteamNeon else SteamTextPrimary
-                            )
-                        }
-                    }
-
-                    // SEK / EUR Currency Switcher
-                    Surface(
-                        color = SteamBg,
-                        shape = RoundedCornerShape(9.dp),
-                        border = BorderStroke(1.dp, SteamBorder),
-                        modifier = Modifier.padding(end = 2.dp)
-                    ) {
-                        Row(modifier = Modifier.padding(2.dp)) {
-                            CurrencyMode.entries.forEach { mode ->
-                                val active = uiState.currency == mode
-                                Surface(
-                                    onClick = { pulseViewModel.setCurrency(mode) },
-                                    color = if (active) SteamAccent else Color.Transparent,
-                                    shape = RoundedCornerShape(7.dp),
-                                    modifier = Modifier.testTag("currency_${mode.code.lowercase()}")
-                                ) {
-                                    Text(
-                                        text = mode.code,
-                                        fontFamily = JetBrainsMonoFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        color = if (active) Color(0xFF020617) else SteamTextSecondary,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    if (isGuest) {
-                        Surface(
-                            onClick = onNavigateToLogin,
-                            color = SteamAccent.copy(alpha = 0.16f),
-                            shape = RoundedCornerShape(9.dp),
-                            border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.5f)),
-                            modifier = Modifier
-                                .padding(end = 4.dp)
-                                .minimumInteractiveComponentSize()
-                                .testTag("guest_login_button")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Person,
-                                    contentDescription = "Logga in",
-                                    tint = SteamAccent,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "Logga in",
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = SteamAccent
-                                )
-                            }
-                        }
-                    }
-
-                    IconButton(
-                        onClick = {
-                            if (isGuest) {
-                                onNavigateToLogin()
-                            } else {
-                                signOut(credentialManager, scope)
-                            }
-                        },
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("sign_out_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.Logout,
-                            contentDescription = if (isGuest) "Avsluta gästläge" else "Logga ut",
-                            tint = SteamTextSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
+            SteamPulseTopBar(
+                currency = uiState.currency,
+                isGuest = isGuest,
+                userDisplayName = userDisplayName,
+                userEmail = userEmail,
+                hasUpdateAvailable = releaseState.hasUpdateAvailable,
+                onSelectCurrency = pulseViewModel::setCurrency,
+                onNavigateToLogin = onNavigateToLogin,
+                onOpenReleases = { showReleasePage = true },
+                onSignOut = { signOut(credentialManager, scope) }
             )
         },
         bottomBar = {
@@ -722,3 +567,232 @@ private fun TabIconWithBadge(
         Icon(imageVector = icon, contentDescription = tab.label)
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SteamPulseTopBar(
+    currency: CurrencyMode,
+    isGuest: Boolean,
+    userDisplayName: String?,
+    userEmail: String?,
+    hasUpdateAvailable: Boolean,
+    onSelectCurrency: (CurrencyMode) -> Unit,
+    onNavigateToLogin: () -> Unit,
+    onOpenReleases: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    var accountMenuExpanded by remember { mutableStateOf(false) }
+
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = SteamSurface,
+            titleContentColor = SteamTextPrimary
+        ),
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Brush.linearGradient(listOf(SteamAccent, SteamNeon))),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Bolt,
+                        contentDescription = null,
+                        tint = Color(0xFF020617),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "SteamPulse",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontSize = 17.sp,
+                        color = SteamTextPrimary,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "& DEALS 2026",
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontSize = 9.sp,
+                        color = SteamAccent,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        },
+        actions = {
+            // Compact SEK / EUR Currency Switcher
+            Surface(
+                color = SteamBg,
+                shape = RoundedCornerShape(9.dp),
+                border = BorderStroke(1.dp, SteamBorder),
+                modifier = Modifier.padding(end = 6.dp)
+            ) {
+                Row(modifier = Modifier.padding(2.dp)) {
+                    CurrencyMode.entries.forEach { mode ->
+                        val active = currency == mode
+                        Surface(
+                            onClick = { onSelectCurrency(mode) },
+                            color = if (active) SteamAccent else Color.Transparent,
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier.testTag("currency_${mode.code.lowercase()}")
+                        ) {
+                            Text(
+                                text = mode.code,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                color = if (active) Color(0xFF020617) else SteamTextSecondary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Single account button: "Logga in" in guest mode, or user avatar/sign-out menu when signed in
+            if (isGuest) {
+                Surface(
+                    onClick = onNavigateToLogin,
+                    color = SteamAccent.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(9.dp),
+                    border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .minimumInteractiveComponentSize()
+                        .testTag("guest_login_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Person,
+                            contentDescription = "Logga in",
+                            tint = SteamAccent,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Logga in",
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            color = SteamAccent
+                        )
+                    }
+                }
+            } else {
+                val initial = (userDisplayName?.firstOrNull()
+                    ?: userEmail?.firstOrNull()
+                    ?: 'S').uppercaseChar().toString()
+                Box(modifier = Modifier.padding(end = 4.dp)) {
+                    IconButton(
+                        onClick = { accountMenuExpanded = true },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("account_menu_button")
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(SteamAccent.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = initial,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp,
+                                color = SteamAccent
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = accountMenuExpanded,
+                        onDismissRequest = { accountMenuExpanded = false },
+                        containerColor = SteamSurface
+                    ) {
+                        val label = userDisplayName?.takeIf { it.isNotBlank() }
+                            ?: userEmail?.takeIf { it.isNotBlank() }
+                            ?: "Inloggat konto"
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = label,
+                                    color = SteamTextPrimary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            enabled = false,
+                            onClick = {}
+                        )
+                        HorizontalDivider(color = SteamBorder)
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = if (hasUpdateAvailable) SteamNeon else SteamAccent
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = if (hasUpdateAvailable) {
+                                        "Uppdatera (v${BuildConfig.VERSION_NAME})"
+                                    } else {
+                                        "Appversion v${BuildConfig.VERSION_NAME}"
+                                    },
+                                    color = if (hasUpdateAvailable) SteamNeon else SteamTextPrimary
+                                )
+                            },
+                            onClick = {
+                                accountMenuExpanded = false
+                                onOpenReleases()
+                            },
+                            modifier = Modifier.testTag("open_releases_button")
+                        )
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.Logout,
+                                    contentDescription = null,
+                                    tint = SteamTextSecondary
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = "Logga ut",
+                                    color = SteamTextPrimary
+                                )
+                            },
+                            onClick = {
+                                accountMenuExpanded = false
+                                onSignOut()
+                            },
+                            modifier = Modifier.testTag("sign_out_button")
+                        )
+                    }
+                }
+            }
+        }
+    )
+}
+

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,7 +29,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,12 +43,17 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.SteamGamesCatalog
 import com.example.model.CurrencyMode
 import com.example.model.SteamGame
@@ -159,20 +168,16 @@ fun GameCardRow(
                     color = if (game.rank <= 3) SteamAccent else SteamTextSecondary
                 )
 
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(Brush.linearGradient(listOf(game.gradientStart, game.gradientEnd))),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = game.shortCode,
-                        color = Color.White,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 12.sp
-                    )
-                }
+                SteamGameArtBadge(
+                    appId = game.appId,
+                    title = game.title,
+                    shortCode = game.shortCode,
+                    gradientStart = game.gradientStart,
+                    gradientEnd = game.gradientEnd,
+                    width = 68.dp,
+                    height = 42.dp,
+                    cornerRadius = 10.dp
+                )
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
@@ -221,7 +226,7 @@ fun GameCardRow(
                 PlayerSparklineChart(
                     dataPoints = game.trend24h,
                     modifier = Modifier
-                        .width(72.dp)
+                        .width(60.dp)
                         .height(34.dp)
                 )
             }
@@ -413,6 +418,63 @@ fun GameCardRow(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun SteamGameArtBadge(
+    appId: Int,
+    title: String,
+    shortCode: String,
+    gradientStart: Color,
+    gradientEnd: Color,
+    modifier: Modifier = Modifier,
+    width: Dp = 68.dp,
+    height: Dp = 42.dp,
+    cornerRadius: Dp = 10.dp
+) {
+    val context = LocalContext.current
+    var imageAttempt by remember(appId) { mutableIntStateOf(0) }
+    val imageUrls = remember(appId) {
+        if (appId > 0) {
+            listOf(
+                "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/capsule_184x69.jpg",
+                "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/header.jpg"
+            )
+        } else {
+            emptyList()
+        }
+    }
+    val currentUrl = imageUrls.getOrNull(imageAttempt)
+
+    Box(
+        modifier = modifier
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(Brush.linearGradient(listOf(gradientStart, gradientEnd))),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = shortCode,
+            color = Color.White,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 11.sp,
+            maxLines = 1,
+            softWrap = false
+        )
+        if (currentUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(currentUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                onError = { imageAttempt += 1 },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
