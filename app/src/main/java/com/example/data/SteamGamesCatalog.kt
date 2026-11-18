@@ -454,17 +454,28 @@ object SteamGamesCatalog {
 
     fun getBestOffer(game: SteamGame, edition: GameEdition = GameEdition.STANDARD): Pair<StoreOffer, Double> {
         val mult = if (edition == GameEdition.DELUXE) game.deluxeMultiplier else 1.0
-        val best = game.offers.minByOrNull { it.priceEur } ?: game.offers.first()
+        val fallbackOffer = StoreOffer(
+            store = "Steam (Officiell)",
+            isOfficial = true,
+            region = "Global / EU",
+            platform = if (game.isFreeToPlay) "Gratis att spela" else "Steam Direkt",
+            priceEur = game.finalPriceEur,
+            urlType = StoreUrlType.STEAM
+        )
+        val best = game.offers.minByOrNull { it.priceEur } ?: fallbackOffer
         return best to (best.priceEur * mult)
     }
 
     fun getDiscountPercent(game: SteamGame, edition: GameEdition = GameEdition.STANDARD): Int {
-        if (game.steamPriceEur <= 0.0) return 0
+        if (game.offers.isEmpty()) {
+            return game.steamDiscountPercent.coerceIn(0, 99)
+        }
+        if (game.steamPriceEur <= 0.0) return game.steamDiscountPercent.coerceIn(0, 99)
         val mult = if (edition == GameEdition.DELUXE) game.deluxeMultiplier else 1.0
         val steamPrice = game.steamPriceEur * mult
         val (_, bestPrice) = getBestOffer(game, edition)
         val diff = steamPrice - bestPrice
-        if (diff <= 0.0) return 0
+        if (diff <= 0.0) return game.steamDiscountPercent.coerceIn(0, 99)
         return ((diff / steamPrice) * 100.0).roundToInt()
     }
 

@@ -116,15 +116,24 @@ class PulseDealsUiTest {
     }
 
     @Test
-    fun pulseDealsScreen_displaysCompactPlaceholderClearButtonHighlightsAndSteamGameArt() {
+    fun pulseDealsScreen_displaysLiveSearchCategoriesClearButtonAndFocusedGameCards() {
         var query by mutableStateOf("")
-        val catalogGames = SteamGamesCatalog.initialGames.take(3)
+        val liveGame = SteamGamesCatalog.initialGames.first {
+            !it.isFreeToPlay && it.steamPriceEur > 0.0 && SteamGamesCatalog.getDiscountPercent(it) > 0
+        }.copy(
+            playersNow = 42500,
+            peak24h = 58000,
+            isDetailsLoaded = true,
+            isPlayersLoaded = true
+        )
+        var watchedClicked = false
+        var workshopClicked = false
 
         composeTestRule.setContent {
             SteamPulseTheme {
                 PulseDealsScreen(
                     uiState = SteamPulseUiState(
-                        games = catalogGames,
+                        games = listOf(liveGame),
                         searchQuery = query
                     ),
                     watchlistItems = emptyList(),
@@ -135,40 +144,66 @@ class PulseDealsUiTest {
                     onOpenGameDetail = {},
                     onCloseGameDetail = {},
                     onSelectEdition = {},
-                    onToggleWatchlist = { _, _ -> },
+                    onToggleWatchlist = { _, _ -> watchedClicked = true },
                     onSavePriceAlert = { _, _ -> },
-                    onAskAiAboutGame = {}
+                    onAskAiAboutGame = {},
+                    onOpenWorkshopMods = { workshopClicked = true }
                 )
             }
         }
 
-        composeTestRule.onNodeWithText("MEST SPELADE IDAG").assertIsDisplayed()
-        composeTestRule.onNodeWithText("HETASTE RELEASES 2026").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Sök speltitel (t.ex. CS2, Rust)...").assertIsDisplayed()
+        // Static hardcoded hero/telemetry sections should no longer exist
+        composeTestRule.onNodeWithText("MEST SPELADE IDAG").assertDoesNotExist()
+        composeTestRule.onNodeWithText("HETASTE RELEASES 2026").assertDoesNotExist()
+
+        // 4 clean category chips + search bar
+        composeTestRule.onNodeWithTag("category_chip_most_played").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("category_chip_top_sellers").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("category_chip_new_and_trending").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("category_chip_followed").assertIsDisplayed()
+
+        composeTestRule.onNodeWithText("Sök i Steam Store (minst 2 tecken)...").assertIsDisplayed()
         composeTestRule.onNodeWithTag("clear_search_button").assertDoesNotExist()
 
-        // Non-empty query shows trailing clear icon and clears query on click
+        // Non-empty query shows trailing clear icon and search quick actions
         composeTestRule.runOnUiThread {
-            query = "CS2"
+            query = "Elden"
         }
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Sökresultat: 1 spel").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("card_steam_button_${liveGame.id}").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Öppna i Steam").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Bevaka pris").assertIsDisplayed()
+
         composeTestRule.onNodeWithTag("clear_search_button").assertIsDisplayed().performClick()
         assertEquals("", query)
 
-        // Game cards expose real game artwork contentDescription for accessibility & Coil image loading
-        val firstGame = catalogGames.first()
-        composeTestRule.onNodeWithTag("game_card_${firstGame.id}")
+        // Category view shows focused card with artwork, live players, Bevaka & Workshop
+        composeTestRule.onNodeWithTag("game_card_${liveGame.id}")
             .performScrollTo()
             .assertIsDisplayed()
-        composeTestRule.onNodeWithContentDescription(firstGame.title, useUnmergedTree = true)
+        composeTestRule.onNodeWithContentDescription(liveGame.title, useUnmergedTree = true)
             .assertIsDisplayed()
+        composeTestRule.onNodeWithTag("live_players_badge_${liveGame.id}", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("game_discount_badge_${liveGame.id}", useUnmergedTree = true).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("card_watch_button_${liveGame.id}").performClick()
+        assertTrue(watchedClicked)
+
+        composeTestRule.onNodeWithTag("card_workshop_button_${liveGame.id}").performClick()
+        assertTrue(workshopClicked)
     }
 
     @Test
     fun pulseDealsScreen_followedChipAndModalSheetQuickActionsWork() {
         val paidGame = SteamGamesCatalog.initialGames.first {
             !it.isFreeToPlay && it.steamPriceEur > 0.0 && SteamGamesCatalog.getDiscountPercent(it) > 0
-        }
+        }.copy(
+            playersNow = 12340,
+            peak24h = 24000,
+            isDetailsLoaded = true,
+            isPlayersLoaded = true
+        )
         var selectedCategory by mutableStateOf(GameCategory.FOLLOWED)
         var selectedGameId by mutableStateOf<String?>(null)
         var workshopOpenedFor: SteamGame? = null
@@ -187,7 +222,7 @@ class PulseDealsUiTest {
                     onSearchChange = {},
                     onCategorySelect = { selectedCategory = it },
                     onSortSelect = {},
-                    onResetFilters = { selectedCategory = GameCategory.ALL },
+                    onResetFilters = { selectedCategory = GameCategory.MOST_PLAYED },
                     onOpenGameDetail = { selectedGameId = it },
                     onCloseGameDetail = { selectedGameId = null },
                     onSelectEdition = {},
@@ -211,7 +246,7 @@ class PulseDealsUiTest {
 
         // Open detail modal sheet on a paid discounted game
         composeTestRule.runOnUiThread {
-            selectedCategory = GameCategory.ALL
+            selectedCategory = GameCategory.MOST_PLAYED
             selectedGameId = paidGame.id
         }
         composeTestRule.waitForIdle()
@@ -220,8 +255,7 @@ class PulseDealsUiTest {
 
         composeTestRule.onAllNodesWithText("Spelare Nu").onLast().assertIsDisplayed()
         composeTestRule.onAllNodesWithText("24h Peak").onLast().assertIsDisplayed()
-        composeTestRule.onAllNodesWithText("All-Time").onLast().assertIsDisplayed()
-        composeTestRule.onNodeWithText("PRISSAMMANFATTNING").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("PRIS PÅ STEAM STORE").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("target_price_slider").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("target_price_input").performScrollTo().performTextReplacement("120")
         composeTestRule.onNodeWithTag("save_price_alert_button").performScrollTo().performClick()

@@ -1,13 +1,14 @@
 package com.example.ui.screens
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,20 +29,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SearchOff
-import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -72,7 +75,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -92,13 +94,13 @@ import com.example.model.GameEdition
 import com.example.model.SortOrder
 import com.example.model.SteamGame
 import com.example.model.WatchlistItem
-import com.example.ui.components.GameCardRow
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.SteamAccent
 import com.example.ui.theme.SteamAmber
 import com.example.ui.theme.SteamBg
 import com.example.ui.theme.SteamBorder
 import com.example.ui.theme.SteamCard
+import com.example.ui.theme.SteamDanger
 import com.example.ui.theme.SteamNeon
 import com.example.ui.theme.SteamSale
 import com.example.ui.theme.SteamSurface
@@ -120,6 +122,7 @@ fun PulseDealsScreen(
     onCategorySelect: (GameCategory) -> Unit,
     onSortSelect: (SortOrder) -> Unit,
     onResetFilters: () -> Unit,
+    onRefresh: () -> Unit = {},
     onOpenGameDetail: (String) -> Unit,
     onCloseGameDetail: () -> Unit,
     onSelectEdition: (GameEdition) -> Unit,
@@ -128,130 +131,20 @@ fun PulseDealsScreen(
     onAskAiAboutGame: (SteamGame) -> Unit,
     onOpenWorkshopMods: (SteamGame) -> Unit = {}
 ) {
+    val context = LocalContext.current
     val watchedIds = remember(watchlistItems) { watchlistItems.map { it.id }.toSet() }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+
+    val isLoading = (uiState.isSearchActive && uiState.isSearching) ||
+        (!uiState.isSearchActive && uiState.isLoadingCategory)
+    val activeError = if (uiState.isSearchActive) uiState.searchError else uiState.categoryError
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Live Platform Telemetry Banner
-        item(key = "telemetry_banner") {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SteamSurface),
-                border = BorderStroke(1.dp, SteamBorder),
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(9.dp)
-                                .clip(CircleShape)
-                                .background(SteamNeon)
-                        )
-                        Column {
-                            Text(
-                                text = "STEAM ONLINE NU",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SteamTextSecondary
-                            )
-                            Text(
-                                text = SteamGamesCatalog.formatNumber(uiState.globalOnline),
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = SteamTextPrimary
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(28.dp)
-                            .background(SteamBorder)
-                    )
-
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "I SPEL JUST NU",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = SteamTextSecondary
-                        )
-                        Text(
-                            text = SteamGamesCatalog.formatNumber(uiState.globalInGame),
-                            fontFamily = JetBrainsMonoFontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = SteamNeon
-                        )
-                    }
-                }
-            }
-        }
-
-        // Highlight Cards Strip (edge-to-edge LazyRow with 16.dp contentPadding so cards never clip awkwardly)
-        item(key = "hero_highlights") {
-            val cs2 = uiState.games.firstOrNull { it.id == "cs2" }
-            val highlightCards = listOf(
-                HighlightBannerData(
-                    eyebrow = "MEST SPELADE IDAG",
-                    title = "Counter-Strike 2",
-                    subtitle = "${SteamGamesCatalog.formatNumber(cs2?.playersNow ?: 1482910)} aktiva spelare",
-                    accent = SteamAccent,
-                    icon = Icons.Rounded.NotificationsActive,
-                    onClick = { onOpenGameDetail("cs2") }
-                ),
-                HighlightBannerData(
-                    eyebrow = "HETASTE RELEASES 2026",
-                    title = "Phantom Blade Zero",
-                    subtitle = "Jämför nycklar upp till -36%",
-                    accent = SteamNeon,
-                    icon = Icons.Rounded.LocalFireDepartment,
-                    onClick = { onOpenGameDetail("phantom-blade-zero") }
-                ),
-                HighlightBannerData(
-                    eyebrow = "PRISGARANTI & TRANSPARENS",
-                    title = "Officiella & Keyshops",
-                    subtitle = "Steam, CDKeys, Eneba, G2A & Fanatical",
-                    accent = SteamSale,
-                    icon = Icons.Rounded.Shield,
-                    onClick = { onCategorySelect(GameCategory.DEALS) }
-                )
-            )
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(highlightCards, key = { it.eyebrow }) { card ->
-                    HeroHighlightCard(
-                        eyebrow = card.eyebrow,
-                        title = card.title,
-                        subtitle = card.subtitle,
-                        accent = card.accent,
-                        icon = card.icon,
-                        onClick = card.onClick
-                    )
-                }
-            }
-        }
-
-        // Search, Sort & Category Filter Controls
+        // Search, Category & Sort Controls
         item(key = "search_and_filters") {
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -262,7 +155,7 @@ fun PulseDealsScreen(
                     onValueChange = onSearchChange,
                     placeholder = {
                         Text(
-                            text = "Sök speltitel (t.ex. CS2, Rust)...",
+                            text = "Sök i Steam Store (minst 2 tecken)...",
                             color = SteamTextSecondary,
                             fontSize = 13.sp,
                             maxLines = 1,
@@ -274,22 +167,33 @@ fun PulseDealsScreen(
                         Icon(
                             imageVector = Icons.Rounded.Search,
                             contentDescription = null,
-                            tint = SteamTextSecondary
+                            tint = SteamAccent
                         )
                     },
                     trailingIcon = {
-                        if (uiState.searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { onSearchChange("") },
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("clear_search_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Rensa sökning",
-                                    tint = SteamTextSecondary
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (uiState.isSearching) {
+                                CircularProgressIndicator(
+                                    color = SteamAccent,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .padding(end = 4.dp)
                                 )
+                            }
+                            if (uiState.searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { onSearchChange("") },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("clear_search_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Rensa sökning",
+                                        tint = SteamTextSecondary
+                                    )
+                                }
                             }
                         }
                     },
@@ -309,29 +213,127 @@ fun PulseDealsScreen(
                         .testTag("search_games_input")
                 )
 
-                // Sort Bar
+                // Clean Steam Store Category Chips
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GameCategory.entries.forEach { category ->
+                        val selected = !uiState.isSearchActive && uiState.selectedCategory == category
+                        val isFollowed = category == GameCategory.FOLLOWED
+                        val isTrending = category == GameCategory.NEW_AND_TRENDING
+                        val isTopSellers = category == GameCategory.TOP_SELLERS
+
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onCategorySelect(category) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = when {
+                                        isFollowed -> Icons.Rounded.Star
+                                        isTopSellers -> Icons.Rounded.LocalOffer
+                                        isTrending -> Icons.Rounded.LocalFireDepartment
+                                        else -> Icons.Rounded.SportsEsports
+                                    },
+                                    contentDescription = null,
+                                    tint = if (selected) {
+                                        Color(0xFF020617)
+                                    } else when {
+                                        isFollowed -> SteamAmber
+                                        isTopSellers -> SteamSale
+                                        isTrending -> SteamNeon
+                                        else -> SteamAccent
+                                    },
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = category.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = when {
+                                    isFollowed -> SteamAmber
+                                    isTopSellers -> SteamSale
+                                    isTrending -> SteamNeon
+                                    else -> SteamAccent
+                                },
+                                selectedLabelColor = Color(0xFF020617),
+                                containerColor = SteamSurface,
+                                labelColor = when {
+                                    isFollowed -> SteamAmber
+                                    else -> SteamTextSecondary
+                                }
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = selected,
+                                borderColor = when {
+                                    isFollowed -> SteamAmber.copy(alpha = 0.45f)
+                                    else -> SteamBorder
+                                }
+                            ),
+                            modifier = Modifier.testTag("category_chip_${category.name.lowercase()}")
+                        )
+                    }
+                }
+
+                // Count, Refresh & Sort Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "${uiState.games.size} spel visas",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SteamTextSecondary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = if (uiState.isSearchActive) {
+                                "Sökresultat: ${uiState.games.size} spel"
+                            } else {
+                                "${uiState.selectedCategory.label} • ${uiState.games.size} spel"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SteamTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        IconButton(
+                            onClick = onRefresh,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("refresh_pulse_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Uppdatera lista",
+                                tint = SteamAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
 
                     Box {
                         OutlinedButton(
                             onClick = { sortMenuExpanded = true },
                             border = BorderStroke(1.dp, SteamBorder),
                             shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier.minimumInteractiveComponentSize()
                         ) {
                             Text(
-                                text = "Sortera: ${uiState.sortOrder.label}",
+                                text = uiState.sortOrder.label,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = SteamTextPrimary
+                                color = SteamTextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
@@ -365,158 +367,184 @@ fun PulseDealsScreen(
                         }
                     }
                 }
-
-                // Category Chips
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    GameCategory.entries.forEach { category ->
-                        val selected = uiState.selectedCategory == category
-                        val isDeals = category == GameCategory.DEALS
-                        val isFollowed = category == GameCategory.FOLLOWED
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onCategorySelect(category) },
-                            leadingIcon = when {
-                                isFollowed -> {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Star,
-                                            contentDescription = null,
-                                            tint = if (selected) Color(0xFF020617) else SteamAmber,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    }
-                                }
-                                isDeals -> {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Rounded.LocalOffer,
-                                            contentDescription = null,
-                                            tint = if (selected) Color(0xFF020617) else SteamSale,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    }
-                                }
-                                else -> null
-                            },
-                            label = {
-                                Text(
-                                    text = category.label,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 12.sp
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = when {
-                                    isDeals -> SteamSale
-                                    isFollowed -> SteamAmber
-                                    else -> SteamAccent
-                                },
-                                selectedLabelColor = Color(0xFF020617),
-                                containerColor = SteamSurface,
-                                labelColor = when {
-                                    isDeals -> SteamSale
-                                    isFollowed -> SteamAmber
-                                    else -> SteamTextSecondary
-                                }
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
-                                selected = selected,
-                                borderColor = when {
-                                    isDeals -> SteamSale.copy(alpha = 0.4f)
-                                    isFollowed -> SteamAmber.copy(alpha = 0.45f)
-                                    else -> SteamBorder
-                                }
-                            ),
-                            modifier = Modifier.testTag("category_chip_${category.name.lowercase()}")
-                        )
-                    }
-                }
             }
         }
 
-        // Empty State or Games List
-        if (uiState.games.isEmpty()) {
-            item(key = "empty_state") {
-                val isFollowedEmpty = uiState.selectedCategory == GameCategory.FOLLOWED && uiState.searchQuery.isBlank()
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = SteamSurface),
-                    border = BorderStroke(1.dp, SteamBorder),
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    Column(
+        // Loading / Error / Empty / Live Results
+        when {
+            isLoading && uiState.games.isEmpty() -> {
+                item(key = "loading_state") {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SteamSurface),
+                        border = BorderStroke(1.dp, SteamBorder),
+                        shape = RoundedCornerShape(18.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(28.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .padding(horizontal = 16.dp)
                     ) {
-                        Icon(
-                            imageVector = if (isFollowedEmpty) Icons.Rounded.Star else Icons.Rounded.SearchOff,
-                            contentDescription = null,
-                            tint = if (isFollowedEmpty) SteamAmber else SteamTextSecondary,
-                            modifier = Modifier.size(38.dp)
-                        )
-                        Text(
-                            text = if (isFollowedEmpty) {
-                                "Inga följda eller bevakade spel ännu"
-                            } else {
-                                "Inga spel matchade din sökning"
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                            color = SteamTextPrimary,
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = if (isFollowedEmpty) {
-                                "Tryck på ett spel i Puls för att bevaka priset, eller följ spel i Workshop-fliken."
-                            } else {
-                                "Prova att ändra dina filter eller söka på en annan speltitel."
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = SteamTextSecondary,
-                            textAlign = TextAlign.Center
-                        )
-                        Button(
-                            onClick = onResetFilters,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = SteamAccent,
-                                contentColor = Color(0xFF020617)
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.minimumInteractiveComponentSize()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
+                            CircularProgressIndicator(color = SteamAccent)
                             Text(
-                                text = if (isFollowedEmpty) "Visa alla spel" else "Återställ filter",
-                                fontWeight = FontWeight.Bold
+                                text = if (uiState.isSearchActive) {
+                                    "Söker i Steam Store..."
+                                } else {
+                                    "Hämtar livedata från Steam..."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = SteamTextSecondary
                             )
                         }
                     }
                 }
             }
-        } else {
-            items(uiState.games, key = { it.id }) { game ->
-                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    GameCardRow(
-                        game = game,
-                        currency = uiState.currency,
-                        isWatched = watchedIds.contains(game.id),
-                        onClick = { onOpenGameDetail(game.id) }
-                    )
+
+            activeError != null && uiState.games.isEmpty() -> {
+                item(key = "error_state") {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SteamSurface),
+                        border = BorderStroke(1.dp, SteamDanger.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ErrorOutline,
+                                contentDescription = null,
+                                tint = SteamDanger,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = "Kunde inte ladda Steam-data",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = SteamTextPrimary
+                            )
+                            Text(
+                                text = activeError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SteamTextSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                            Button(
+                                onClick = onRefresh,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = SteamAccent,
+                                    contentColor = Color(0xFF020617)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Försök igen", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            uiState.games.isEmpty() -> {
+                item(key = "empty_state") {
+                    val isFollowedEmpty = !uiState.isSearchActive && uiState.selectedCategory == GameCategory.FOLLOWED
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SteamSurface),
+                        border = BorderStroke(1.dp, SteamBorder),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isFollowedEmpty) Icons.Rounded.Star else Icons.Rounded.SearchOff,
+                                contentDescription = null,
+                                tint = if (isFollowedEmpty) SteamAmber else SteamTextSecondary,
+                                modifier = Modifier.size(38.dp)
+                            )
+                            Text(
+                                text = if (isFollowedEmpty) {
+                                    "Inga följda eller bevakade spel ännu"
+                                } else {
+                                    "Inga spel matchade din sökning"
+                                },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = SteamTextPrimary,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = if (isFollowedEmpty) {
+                                    "Tryck på Bevaka på valfritt spel i Puls eller följ spel i Workshop-fliken."
+                                } else {
+                                    "Prova att söka på en annan speltitel i Steam Store."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = SteamTextSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                            Button(
+                                onClick = onResetFilters,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = SteamAccent,
+                                    contentColor = Color(0xFF020617)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Text(
+                                    text = if (isFollowedEmpty) "Visa mest spelade" else "Återställ filter",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                items(uiState.games, key = { it.id }) { game ->
+                    val isWatched = watchedIds.contains(game.id)
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        LivePulseGameCard(
+                            game = game,
+                            currency = uiState.currency,
+                            isWatched = isWatched,
+                            isSearchResult = uiState.isSearchActive,
+                            onCardClick = { onOpenGameDetail(game.id) },
+                            onWatchClick = { onToggleWatchlist(game, isWatched) },
+                            onWorkshopClick = { onOpenWorkshopMods(game) },
+                            onOpenInSteamClick = {
+                                SteamDeepLinkHelper.openStoreGameInSteam(
+                                    context = context,
+                                    appId = game.appId
+                                )
+                            }
+                        )
+                    }
                 }
             }
         }
     }
 
-    // Detail & Price Comparison Bottom Sheet
+    // Detail & Price Alert Bottom Sheet
     val selectedGame = uiState.selectedGame
     if (selectedGame != null) {
         val existingWatch = watchlistItems.firstOrNull { it.id == selectedGame.id }
@@ -541,87 +569,343 @@ fun PulseDealsScreen(
     }
 }
 
-private data class HighlightBannerData(
-    val eyebrow: String,
-    val title: String,
-    val subtitle: String,
-    val accent: Color,
-    val icon: ImageVector,
-    val onClick: () -> Unit
-)
-
 @Composable
-private fun HeroHighlightCard(
-    eyebrow: String,
-    title: String,
-    subtitle: String,
-    accent: Color,
-    icon: ImageVector,
-    onClick: () -> Unit
+private fun LivePulseGameCard(
+    game: SteamGame,
+    currency: CurrencyMode,
+    isWatched: Boolean,
+    isSearchResult: Boolean,
+    onCardClick: () -> Unit,
+    onWatchClick: () -> Unit,
+    onWorkshopClick: () -> Unit,
+    onOpenInSteamClick: () -> Unit
 ) {
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = SteamCard),
-        border = BorderStroke(1.dp, SteamBorder),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.width(240.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = eyebrow,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = accent,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = SteamTextPrimary,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = SteamTextSecondary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
-                )
+    val context = LocalContext.current
+    val (_, bestPriceEur) = remember(game) { SteamGamesCatalog.getBestOffer(game) }
+    val discountPercent = remember(game) { SteamGamesCatalog.getDiscountPercent(game) }
+
+    var headerAttempt by remember(game.appId, game.headerImageUrl) { mutableIntStateOf(0) }
+    val headerUrls = remember(game.appId, game.headerImageUrl) {
+        buildList {
+            if (game.headerImageUrl.isNotBlank()) add(game.headerImageUrl)
+            if (game.appId > 0) {
+                add("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${game.appId}/header.jpg")
+                add("https://cdn.akamai.steamstatic.com/steam/apps/${game.appId}/header.jpg")
             }
-            Spacer(modifier = Modifier.width(10.dp))
+        }.distinct()
+    }
+    val activeHeaderUrl = headerUrls.getOrNull(headerAttempt)
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SteamSurface),
+        border = BorderStroke(
+            1.dp,
+            if (isWatched) SteamAmber.copy(alpha = 0.55f) else SteamBorder
+        ),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onCardClick)
+            .testTag("game_card_${game.id}")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Steam Header Artwork Banner
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accent.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .height(142.dp)
+                    .background(Brush.linearGradient(listOf(game.gradientStart, game.gradientEnd)))
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(22.dp)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = game.shortCode,
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 22.sp
+                    )
+                }
+
+                if (activeHeaderUrl != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(activeHeaderUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = game.title,
+                        contentScale = ContentScale.Crop,
+                        onError = { headerAttempt += 1 },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0x33020617), Color(0xCC090D16))
+                            )
+                        )
                 )
+
+                // Top Row: Rank Badge & Discount Badge
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp)
+                        .align(Alignment.TopStart),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (game.rank > 0 && !isSearchResult) {
+                        Surface(
+                            color = Color(0xCC020617),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, SteamBorder)
+                        ) {
+                            Text(
+                                text = "#${game.rank}",
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 11.sp,
+                                color = if (game.rank <= 3) SteamAccent else SteamTextPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    } else {
+                        Spacer(Modifier.width(1.dp))
+                    }
+
+                    if (discountPercent > 0) {
+                        Surface(
+                            color = SteamSale,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("game_discount_badge_${game.id}")
+                        ) {
+                            Text(
+                                text = "-$discountPercent%",
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 12.sp,
+                                color = Color(0xFF020617),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Bottom Live Player Count Badge
+                if (game.playersNow > 0) {
+                    Surface(
+                        color = Color(0xD9020617),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, SteamNeon.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(10.dp)
+                            .testTag("live_players_badge_${game.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(SteamNeon)
+                            )
+                            Text(
+                                text = "${SteamGamesCatalog.formatNumber(game.playersNow)} spelar nu",
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = SteamNeon
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Card Content: Title, Price & Action Buttons
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = game.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = SteamTextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val metaSubtitle = buildList {
+                            if (game.developer.isNotBlank() && game.developer != "Steam") add(game.developer)
+                            if (game.genres.isNotEmpty()) add(game.genres.take(2).joinToString(" • "))
+                        }.joinToString(" • ").ifBlank { "Steam AppID ${game.appId}" }
+                        Text(
+                            text = metaSubtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SteamTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Current Steam Price Column
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (game.isFreeToPlay || bestPriceEur <= 0.0) {
+                            Surface(
+                                color = SteamNeon.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, SteamNeon.copy(alpha = 0.35f))
+                            ) {
+                                Text(
+                                    text = "Gratis",
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = SteamNeon,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        } else {
+                            if (discountPercent > 0 && game.steamPriceEur > bestPriceEur) {
+                                Text(
+                                    text = SteamGamesCatalog.formatPrice(game.steamPriceEur, currency),
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontSize = 11.sp,
+                                    color = SteamTextSecondary,
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                            }
+                            Text(
+                                text = SteamGamesCatalog.formatPrice(bestPriceEur, currency),
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp,
+                                color = if (discountPercent > 0) SteamSale else SteamTextPrimary
+                            )
+                        }
+                    }
+                }
+
+                // Action Buttons Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onWatchClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isWatched) SteamAmber else SteamAccent,
+                            contentColor = Color(0xFF020617)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .testTag("card_watch_button_${game.id}")
+                    ) {
+                        Icon(
+                            imageVector = if (isWatched) Icons.Rounded.NotificationsActive else Icons.Rounded.Notifications,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = when {
+                                isWatched -> "Bevakad"
+                                isSearchResult -> "Bevaka pris"
+                                else -> "Bevaka"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    if (isSearchResult) {
+                        OutlinedButton(
+                            onClick = onOpenInSteamClick,
+                            border = BorderStroke(1.dp, SteamNeon.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .minimumInteractiveComponentSize()
+                                .testTag("card_steam_button_${game.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                contentDescription = null,
+                                tint = SteamNeon,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Öppna i Steam",
+                                color = SteamNeon,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onWorkshopClick,
+                            border = BorderStroke(1.dp, SteamAccent.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .minimumInteractiveComponentSize()
+                                .testTag("card_workshop_button_${game.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Extension,
+                                contentDescription = null,
+                                tint = SteamAccent,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Workshop",
+                                color = SteamAccent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun GameDetailModalSheet(
     game: SteamGame,
@@ -643,7 +927,8 @@ private fun GameDetailModalSheet(
     val discountPercent = remember(game) { SteamGamesCatalog.getDiscountPercent(game) }
     val steamBaseInCurrency = remember(game, currency, selectedEdition) {
         val mult = if (selectedEdition == GameEdition.DELUXE) game.deluxeMultiplier else 1.0
-        SteamGamesCatalog.getNumericPrice(game.steamPriceEur * mult, currency)
+        val base = if (game.steamPriceEur > 0.0) game.steamPriceEur else game.finalPriceEur
+        SteamGamesCatalog.getNumericPrice(base * mult, currency)
     }
     val sliderMax = remember(steamBaseInCurrency, currency) {
         val minTop = if (currency == CurrencyMode.SEK) 150f else 15f
@@ -678,24 +963,22 @@ private fun GameDetailModalSheet(
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Steam Header Artwork Banner
-            var headerImageAttempt by remember(game.appId) { mutableIntStateOf(0) }
-            val headerUrls = remember(game.appId) {
-                if (game.appId > 0) {
-                    listOf(
-                        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${game.appId}/header.jpg",
-                        "https://cdn.akamai.steamstatic.com/steam/apps/${game.appId}/header.jpg"
-                    )
-                } else {
-                    emptyList()
-                }
+            var headerImageAttempt by remember(game.appId, game.headerImageUrl) { mutableIntStateOf(0) }
+            val headerUrls = remember(game.appId, game.headerImageUrl) {
+                buildList {
+                    if (game.headerImageUrl.isNotBlank()) add(game.headerImageUrl)
+                    if (game.appId > 0) {
+                        add("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${game.appId}/header.jpg")
+                        add("https://cdn.akamai.steamstatic.com/steam/apps/${game.appId}/header.jpg")
+                    }
+                }.distinct()
             }
             val activeHeaderUrl = headerUrls.getOrNull(headerImageAttempt)
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(148.dp)
+                    .height(152.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(Brush.linearGradient(listOf(game.gradientStart, game.gradientEnd)))
             ) {
@@ -744,7 +1027,7 @@ private fun GameDetailModalSheet(
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            text = "#${game.rank} på Steam",
+                            text = if (game.rank > 0) "#${game.rank} • AppID ${game.appId}" else "AppID ${game.appId}",
                             fontFamily = JetBrainsMonoFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
@@ -783,7 +1066,10 @@ private fun GameDetailModalSheet(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${game.developer} • ${game.genres.joinToString(" • ")}",
+                        text = buildList {
+                            if (game.developer.isNotBlank()) add(game.developer)
+                            if (game.releaseDate.isNotBlank()) add(game.releaseDate)
+                        }.joinToString(" • "),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFFCBD5E1),
                         maxLines = 1,
@@ -792,89 +1078,106 @@ private fun GameDetailModalSheet(
                 }
             }
 
-            // Player Count Breakdown + Historical Low
+            if (game.genres.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    game.genres.take(5).forEach { genre ->
+                        Surface(
+                            color = SteamBg,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, SteamBorder)
+                        ) {
+                            Text(
+                                text = genre,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SteamTextSecondary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (game.shortDescription.isNotBlank()) {
+                Text(
+                    text = game.shortDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SteamTextSecondary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Live Player Count Breakdown
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 TelemetryStatBox(
                     label = "Spelare Nu",
-                    value = SteamGamesCatalog.formatNumber(game.playersNow),
+                    value = if (game.playersNow > 0) SteamGamesCatalog.formatNumber(game.playersNow) else "—",
                     valueColor = SteamNeon,
                     modifier = Modifier.weight(1f)
                 )
                 TelemetryStatBox(
                     label = "24h Peak",
-                    value = SteamGamesCatalog.formatNumber(game.peak24h),
+                    value = if (game.peak24h > 0) SteamGamesCatalog.formatNumber(game.peak24h) else "—",
                     valueColor = SteamTextPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                TelemetryStatBox(
-                    label = "All-Time",
-                    value = SteamGamesCatalog.formatNumber(game.allTimePeak),
-                    valueColor = SteamAccent,
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            // Price Comparison Summary Card
-            val (bestOfferSummary, bestSummaryEur) = remember(game, selectedEdition) {
-                SteamGamesCatalog.getBestOffer(game, selectedEdition)
-            }
+            // Steam Store Price Summary
             Surface(
                 color = SteamBg,
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, SteamBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
+                    Text(
+                        text = "PRIS PÅ STEAM STORE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SteamTextSecondary
+                    )
+                    if (game.isFreeToPlay || currentBestEur <= 0.0) {
                         Text(
-                            text = "PRISSAMMANFATTNING",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = SteamTextSecondary
+                            text = "Gratis att spela på Steam",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = SteamNeon
                         )
-                        if (game.steamPriceEur <= 0.0) {
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Text(
-                                text = "Gratis att spela på Steam",
-                                style = MaterialTheme.typography.titleMedium,
+                                text = SteamGamesCatalog.formatPrice(currentBestEur, currency),
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 18.sp,
                                 color = SteamNeon
                             )
-                        } else {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = SteamGamesCatalog.formatPrice(bestSummaryEur, currency),
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 18.sp,
-                                    color = SteamNeon
-                                )
-                                if (discountPercent > 0) {
-                                    Surface(
-                                        color = SteamSale,
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = "-$discountPercent%",
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF020617),
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
+                            if (discountPercent > 0) {
+                                Surface(
+                                    color = SteamSale,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "-$discountPercent%",
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF020617),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
                                 }
                                 Text(
                                     text = SteamGamesCatalog.formatPrice(game.steamPriceEur, currency),
@@ -884,13 +1187,6 @@ private fun GameDetailModalSheet(
                                     textDecoration = TextDecoration.LineThrough
                                 )
                             }
-                            Text(
-                                text = "Lägsta nu hos ${bestOfferSummary.store} • Rekordlågt: ${SteamGamesCatalog.formatPrice(game.historicalLowEur, currency)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SteamTextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
                         }
                     }
                 }
@@ -962,31 +1258,8 @@ private fun GameDetailModalSheet(
                 }
             }
 
-            // Edition Switcher + Target Price Slider & Input ("Bevaka pris")
-            if (game.steamPriceEur > 0.0) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    GameEdition.entries.forEach { edition ->
-                        val selected = selectedEdition == edition
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onSelectEdition(edition) },
-                            label = {
-                                Text(edition.label, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = SteamAccent,
-                                selectedLabelColor = Color(0xFF020617),
-                                containerColor = SteamBg,
-                                labelColor = SteamTextSecondary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
+            // Target Price Slider & Input ("Bevaka pris")
+            if (!game.isFreeToPlay && currentBestEur > 0.0) {
                 Surface(
                     color = SteamBg.copy(alpha = 0.7f),
                     shape = RoundedCornerShape(14.dp),
@@ -1115,176 +1388,12 @@ private fun GameDetailModalSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Fråga AI-rådgivaren om bästa deal för ${game.shortCode}",
+                    text = "Fråga AI-rådgivaren om ${game.title}",
                     color = SteamAccent,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-            }
-
-            // Retailers List
-            Text(
-                text = "PRISJÄMFÖRELSE MELLAN BUTIKER",
-                style = MaterialTheme.typography.labelSmall,
-                color = SteamTextSecondary
-            )
-
-            val mult = if (selectedEdition == GameEdition.DELUXE) game.deluxeMultiplier else 1.0
-            val steamBaseEur = game.steamPriceEur * mult
-            val sortedOffers = game.offers
-                .map { it to (it.priceEur * mult) }
-                .sortedBy { it.second }
-
-            sortedOffers.forEachIndexed { index, (offer, finalPriceEur) ->
-                val isBest = index == 0 && finalPriceEur > 0.0
-                val discount = if (steamBaseEur > 0.0) {
-                    (((steamBaseEur - finalPriceEur) / steamBaseEur) * 100.0).roundToInt().coerceAtLeast(0)
-                } else 0
-
-                Surface(
-                    color = if (isBest) SteamNeon.copy(alpha = 0.09f) else SteamBg,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isBest) SteamNeon.copy(alpha = 0.45f) else SteamBorder
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = offer.store,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = SteamTextPrimary
-                                )
-                                if (isBest) {
-                                    Surface(
-                                        color = SteamNeon,
-                                        shape = RoundedCornerShape(5.dp)
-                                    ) {
-                                        Text(
-                                            text = "BÄSTA",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color(0xFF020617),
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                text = offer.typeLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (offer.isOfficial) SteamAccent else SteamAmber
-                            )
-                            Text(
-                                text = "${offer.region} • ${offer.platform}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SteamTextSecondary
-                            )
-                        }
-
-                        Column(horizontalAlignment = Alignment.End) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                if (discount > 0) {
-                                    Surface(
-                                        color = SteamSale,
-                                        shape = RoundedCornerShape(5.dp)
-                                    ) {
-                                        Text(
-                                            text = "-$discount%",
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 10.sp,
-                                            color = Color(0xFF020617),
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = SteamGamesCatalog.formatPrice(finalPriceEur, currency),
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 15.sp,
-                                    color = SteamTextPrimary
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Button(
-                                onClick = {
-                                    val url = SteamGamesCatalog.buildStoreUrl(offer.urlType, game)
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isBest) SteamNeon else SteamAccent,
-                                    contentColor = Color(0xFF020617)
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.minimumInteractiveComponentSize()
-                            ) {
-                                Text("Butik", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // External Trackers
-            Text(
-                text = "PRISHISTORIK & STATISTIK",
-                style = MaterialTheme.typography.labelSmall,
-                color = SteamTextSecondary
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.horizontalScroll(rememberScrollState())
-            ) {
-                val trackers = listOf(
-                    "SteamDB" to SteamGamesCatalog.buildSteamDbUrl(game),
-                    "GG.deals" to SteamGamesCatalog.buildGgDealsUrl(game),
-                    "IsThereAnyDeal" to SteamGamesCatalog.buildItadUrl(game)
-                )
-                trackers.forEach { (name, url) ->
-                    OutlinedButton(
-                        onClick = {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        },
-                        border = BorderStroke(1.dp, SteamBorder),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.minimumInteractiveComponentSize()
-                    ) {
-                        Text(name, color = SteamAccent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
-                            contentDescription = null,
-                            tint = SteamAccent,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
             }
         }
     }
@@ -1303,19 +1412,25 @@ private fun TelemetryStatBox(
         border = BorderStroke(1.dp, SteamBorder),
         modifier = modifier
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = SteamTextSecondary
+                color = SteamTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = value,
                 fontFamily = JetBrainsMonoFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = valueColor
+                color = valueColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

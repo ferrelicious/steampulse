@@ -68,6 +68,7 @@ import com.example.ui.theme.SteamSale
 import com.example.ui.theme.SteamSurface
 import com.example.ui.theme.SteamTextPrimary
 import com.example.ui.theme.SteamTextSecondary
+import com.example.viewmodel.SteamPulseViewModel
 import com.example.viewmodel.WatchlistUiState
 import kotlin.math.roundToInt
 
@@ -183,7 +184,9 @@ fun WatchlistScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(watchlistState.items, key = { it.id }) { item ->
+                            val itemAppId = SteamPulseViewModel.extractAppIdFromWatchlistId(item.id)
                             val game = games.firstOrNull { it.id == item.id }
+                                ?: itemAppId?.let { appId -> games.firstOrNull { it.appId == appId } }
                             WatchlistItemCard(
                                 item = item,
                                 game = game,
@@ -258,7 +261,7 @@ private fun WatchlistItemCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 SteamGameArtBadge(
-                    appId = game?.appId ?: 0,
+                    appId = game?.appId ?: SteamPulseViewModel.extractAppIdFromWatchlistId(item.id) ?: 0,
                     title = item.gameTitle,
                     shortCode = game?.shortCode ?: item.id.take(4).uppercase(),
                     gradientStart = game?.gradientStart ?: SteamCard,

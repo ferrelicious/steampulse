@@ -96,7 +96,9 @@ class PulseCardStudioViewModel(
                     appId = game.appId,
                     title = game.title,
                     developer = game.developer,
-                    headerImageUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${game.appId}/header.jpg",
+                    headerImageUrl = game.headerImageUrl.ifBlank {
+                        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${game.appId}/header.jpg"
+                    },
                     steamGame = game,
                     isFollowedWorkshop = game.appId in followedAppIds
                 )

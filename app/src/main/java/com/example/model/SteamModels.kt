@@ -17,20 +17,17 @@ enum class GameEdition(val label: String) {
 }
 
 enum class SortOrder(val label: String) {
+    DEFAULT("Standardordning"),
     PLAYERS_DESC("Flest spelare just nu"),
-    PEAK24_DESC("24h Peak (Högst först)"),
     PRICE_ASC("Lägsta pris"),
     DISCOUNT_DESC("Störst rabatt (%)")
 }
 
 enum class GameCategory(val label: String) {
-    FOLLOWED("Mina följda"),
-    ALL("Alla spel"),
-    FPS("FPS/Taktiskt"),
-    RPG("RPG/Action"),
-    SURVIVAL("Överlevnad/Sandbox"),
-    FREE("Gratis att spela"),
-    DEALS("Rea/Bäst pris")
+    MOST_PLAYED("Mest spelade"),
+    TOP_SELLERS("Toppsäljare"),
+    NEW_AND_TRENDING("Nya & Trendande"),
+    FOLLOWED("Mina följda")
 }
 
 enum class StoreUrlType {
@@ -71,10 +68,21 @@ data class SteamGame(
     val peak24h: Int,
     val allTimePeak: Int,
     val steamPriceEur: Double,
-    val deluxeMultiplier: Double,
-    val historicalLowEur: Double,
-    val trend24h: List<Int>,
-    val offers: List<StoreOffer>
+    val deluxeMultiplier: Double = 1.3,
+    val historicalLowEur: Double = steamPriceEur,
+    val trend24h: List<Int> = emptyList(),
+    val offers: List<StoreOffer> = emptyList(),
+    val headerImageUrl: String = if (appId > 0) {
+        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/header.jpg"
+    } else {
+        ""
+    },
+    val finalPriceEur: Double = offers.minByOrNull { it.priceEur }?.priceEur ?: steamPriceEur,
+    val steamDiscountPercent: Int = 0,
+    val shortDescription: String = "",
+    val releaseDate: String = "",
+    val isDetailsLoaded: Boolean = false,
+    val isPlayersLoaded: Boolean = playersNow > 0
 )
 
 @IgnoreExtraProperties

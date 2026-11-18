@@ -95,6 +95,7 @@ import com.example.auth.authStateFlow
 import com.example.auth.signOut
 import com.example.data.GitHubReleaseRepository
 import com.example.data.SteamGamesCatalog
+import com.example.data.SteamPulseRepository
 import com.example.data.SteamWorkshopRepository
 import com.example.data.WatchlistRepository
 import com.example.data.WorkshopFollowRepository
@@ -287,7 +288,8 @@ private fun AuthenticatedAppShell(
                 SteamPulseViewModel(
                     watchlistRepository = WatchlistRepository(db),
                     currentUserId = currentUserId,
-                    localStore = WorkshopLocalStore(app)
+                    localStore = WorkshopLocalStore(app),
+                    pulseRepository = SteamPulseRepository(cacheDir = app.cacheDir)
                 )
             }
         }
@@ -591,6 +593,7 @@ private fun AuthenticatedAppShell(
                                     onCategorySelect = pulseViewModel::selectCategory,
                                     onSortSelect = pulseViewModel::selectSortOrder,
                                     onResetFilters = pulseViewModel::resetFilters,
+                                    onRefresh = pulseViewModel::refreshActiveList,
                                     onOpenGameDetail = pulseViewModel::openGameDetail,
                                     onCloseGameDetail = pulseViewModel::closeGameDetail,
                                     onSelectEdition = pulseViewModel::selectEdition,
@@ -651,7 +654,9 @@ private fun AuthenticatedAppShell(
 
                                 AppTab.WATCHLIST -> WatchlistScreen(
                                     watchlistState = watchlistState,
-                                    games = uiState.games,
+                                    games = remember(uiState.games, uiState.knownGames) {
+                                        (uiState.games + uiState.knownGames).distinctBy { it.id }
+                                    },
                                     currency = uiState.currency,
                                     onOpenGame = { gameId ->
                                         pulseViewModel.openGameDetail(gameId)
@@ -669,7 +674,9 @@ private fun AuthenticatedAppShell(
 
                                 AppTab.IMAGE_STUDIO -> PulseCardStudioScreen(
                                     viewModel = pulseCardStudioViewModel,
-                                    pulsGames = uiState.games,
+                                    pulsGames = remember(uiState.games, uiState.knownGames) {
+                                        (uiState.games + uiState.knownGames).distinctBy { it.id }
+                                    },
                                     followedGames = workshopState.followedGames,
                                     followedMods = workshopState.followedMods,
                                     currency = uiState.currency,
