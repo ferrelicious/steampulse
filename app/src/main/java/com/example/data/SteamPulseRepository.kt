@@ -49,12 +49,29 @@ class SteamPulseRepository(
     )
 
     private val categoryMemoryCache = ConcurrentHashMap<GameCategory, CacheEntry<List<SteamGame>>>()
+    private val specialsMemoryCache = ConcurrentHashMap<String, CacheEntry<List<SteamGame>>>()
     private val searchMemoryCache = ConcurrentHashMap<String, CacheEntry<List<SteamGame>>>()
     private val appDetailsMemoryCache = ConcurrentHashMap<Int, CacheEntry<SteamAppDetails>>()
     private val playersMemoryCache = ConcurrentHashMap<Int, CacheEntry<Int>>()
 
     private val diskCacheFolder: File? by lazy {
         cacheDir?.let { File(it, "steam_pulse_cache").apply { mkdirs() } }
+    }
+
+    suspend fun fetchSteamSpecials(forceRefresh: Boolean = false): List<SteamGame> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (!forceRefresh) {
+            specialsMemoryCache["specials"]?.takeIf { now - it.cachedAtMs <= CATEGORY_TTL_MS }?.let {
+                return@withContext it.value
+            }
+        }
+        val specials = fetchFeaturedCategoryItems("specials", forceRefresh)
+            .filter { it.steamDiscountPercent > 0 }
+            .sortedByDescending { it.steamDiscountPercent }
+        if (specials.isNotEmpty()) {
+            specialsMemoryCache["specials"] = CacheEntry(specials, now)
+        }
+        specials
     }
 
     suspend fun fetchCategoryGames(

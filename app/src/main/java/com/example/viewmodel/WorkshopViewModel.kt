@@ -74,7 +74,8 @@ data class WorkshopScreenUiState(
     val quietHoursEndHour: Int = WorkshopLocalStore.DEFAULT_QUIET_END_HOUR,
     val alwaysOpenModsInSteamApp: Boolean = true,
     val followedModsFilterMode: FollowedModsFilterMode = FollowedModsFilterMode.ALL,
-    val seenModUpdateEpochSec: Map<String, Long> = emptyMap()
+    val seenModUpdateEpochSec: Map<String, Long> = emptyMap(),
+    val lastSteamSyncEpochSec: Long = 0L
 ) {
     val isShowingStoreSearch: Boolean
         get() = storeSearchResults != null
@@ -86,6 +87,14 @@ data class WorkshopScreenUiState(
         get() = followedMods.filter {
             it.source == WorkshopFollowSource.BOOKMARK || it.source == WorkshopFollowSource.BOTH
         }.map { it.publishedFileId }.toSet()
+
+    val syncedModsCount: Int
+        get() {
+            val steamSyncedCount = followedMods.count {
+                it.source == WorkshopFollowSource.STEAM_SYNC || it.source == WorkshopFollowSource.BOTH
+            }
+            return if (steamSyncedCount > 0) steamSyncedCount else (syncProfile?.syncedCount ?: 0)
+        }
 
     val updatedFollowedModsCount: Int
         get() = followedMods.count {
@@ -197,7 +206,8 @@ class WorkshopViewModel(
                 quietHoursStartHour = store.getQuietHoursStart(storeKey),
                 quietHoursEndHour = store.getQuietHoursEnd(storeKey),
                 alwaysOpenModsInSteamApp = store.isAlwaysOpenModsInSteamApp(storeKey),
-                seenModUpdateEpochSec = seenUpdates
+                seenModUpdateEpochSec = seenUpdates,
+                lastSteamSyncEpochSec = snapshot.lastSteamSyncEpochSec
             )
         }
         lastFeedGameIds = snapshot.followedGames.map { it.appId }.toSet()
@@ -901,9 +911,11 @@ class WorkshopViewModel(
         val rawInput = _uiState.value.steamProfileInput.trim()
             .ifBlank { _uiState.value.steamSessionSteamId64.trim() }
         if (rawInput.isBlank() && sessionCookieSnapshot == null) {
+            val msg = "Ange ditt SteamID64, din Steam-profil-URL eller logga in med Steam."
             _uiState.update {
-                it.copy(steamSyncState = SteamSyncUiState.Error("Ange ditt SteamID64, din Steam-profil-URL eller logga in med Steam."))
+                it.copy(steamSyncState = SteamSyncUiState.Error(msg))
             }
+            _toastEvents.tryEmit(msg)
             return
         }
 
@@ -960,9 +972,11 @@ class WorkshopViewModel(
                         .distinctBy { it.publishedFileId }
                         .sortedByDescending { maxOf(it.updatedEpochSec, it.updatedAt?.seconds ?: 0L) }
 
+                    val syncEpochSec = nowTs.seconds
                     hasPendingLocalSyncProfile = true
                     localStore?.saveFollowedMods(storeKey, mergedMods)
                     localStore?.saveSyncProfile(storeKey, newProfile)
+                    localStore?.saveLastSteamSyncEpochSec(storeKey, syncEpochSec)
                     val updatedSeenMap = localStore?.initializeModUpdateBaselinesIfMissing(
                         userId = storeKey,
                         mods = mergedMods,
@@ -973,6 +987,7 @@ class WorkshopViewModel(
                         current.copy(
                             followedMods = mergedMods,
                             syncProfile = newProfile,
+                            lastSteamSyncEpochSec = syncEpochSec,
                             steamSyncState = SteamSyncUiState.Success(syncResult.steamId64, syncResult.mods.size),
                             showSteamSyncDialog = false,
                             seenModUpdateEpochSec = updatedSeenMap ?: current.seenModUpdateEpochSec
@@ -986,8 +1001,10 @@ class WorkshopViewModel(
                         }
                     )
                 } else {
+                    val syncEpochSec = nowTs.seconds
                     hasPendingLocalSyncProfile = true
                     localStore?.saveSyncProfile(storeKey, newProfile)
+                    localStore?.saveLastSteamSyncEpochSec(storeKey, syncEpochSec)
                     val emptyMsg = if (syncResult.isAuthenticatedSubscriptions) {
                         "0 prenumererade Workshop-moddar hittades på ditt Steam-konto (${syncResult.steamId64})."
                     } else {
@@ -996,6 +1013,7 @@ class WorkshopViewModel(
                     _uiState.update {
                         it.copy(
                             syncProfile = newProfile,
+                            lastSteamSyncEpochSec = syncEpochSec,
                             steamSyncState = SteamSyncUiState.EmptyDiagnostic(
                                 steamId64 = syncResult.steamId64,
                                 queriedUrl = syncResult.queriedUrl,
@@ -1005,6 +1023,7 @@ class WorkshopViewModel(
                             showSteamSyncDialog = true
                         )
                     }
+                    _toastEvents.tryEmit(emptyMsg)
                 }
 
                 // Step 3: Non-blocking background sync to Firestore (NEVER uploads steamSessionCookie); never fails or blocks the Steam dialog.
@@ -1034,28 +1053,30 @@ class WorkshopViewModel(
             } catch (e: SteamSessionExpiredException) {
                 steamSessionCookie = ""
                 localStore?.clearSteamSession(storeKey)
+                val msg = e.message ?: "Din Steam-session har gått ut. Logga in med Steam igen."
                 _uiState.update {
                     it.copy(
                         hasSteamSession = false,
                         steamSessionSteamId64 = "",
-                        steamSyncState = SteamSyncUiState.Error(
-                            e.message ?: "Din Steam-session har gått ut. Logga in med Steam igen."
-                        )
+                        steamSyncState = SteamSyncUiState.Error(msg)
                     )
                 }
+                _toastEvents.tryEmit(msg)
             } catch (e: SteamProfilePrivateException) {
+                val msg = e.message ?: "Steam-profilen är privat."
                 _uiState.update {
-                    it.copy(steamSyncState = SteamSyncUiState.Error(e.message ?: "Steam-profilen är privat."))
+                    it.copy(steamSyncState = SteamSyncUiState.Error(msg))
                 }
+                _toastEvents.tryEmit(msg)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed syncing Steam subscriptions/favorites for '$rawInput'", e)
+                val msg = e.localizedMessage ?: "Kunde inte synka Steam-moddar."
                 _uiState.update {
                     it.copy(
-                        steamSyncState = SteamSyncUiState.Error(
-                            e.localizedMessage ?: "Kunde inte synka Steam-moddar."
-                        )
+                        steamSyncState = SteamSyncUiState.Error(msg)
                     )
                 }
+                _toastEvents.tryEmit(msg)
             }
         }
     }

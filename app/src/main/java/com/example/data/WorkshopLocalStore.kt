@@ -26,7 +26,8 @@ data class WorkshopLocalSnapshot(
     val syncProfile: SteamWorkshopSyncProfile? = null,
     val steamSessionCookie: String = "",
     val steamSessionSteamId64: String = "",
-    val steamSessionUserAgent: String = ""
+    val steamSessionUserAgent: String = "",
+    val lastSteamSyncEpochSec: Long = 0L
 )
 
 class WorkshopLocalStore(
@@ -44,13 +45,17 @@ class WorkshopLocalStore(
         val sessionCookie = prefs.getString("${prefix}steam_session_cookie", null).orEmpty()
         val sessionSteamId64 = prefs.getString("${prefix}steam_session_steamid64", null).orEmpty()
         val sessionUserAgent = prefs.getString("${prefix}steam_session_user_agent", null).orEmpty()
+        val lastSteamSyncEpochSec = getLastSteamSyncEpochSec(userId)
+            .takeIf { it > 0L }
+            ?: (syncProfile?.updatedAt?.seconds ?: 0L)
         return WorkshopLocalSnapshot(
             followedGames = games,
             followedMods = mods,
             syncProfile = syncProfile,
             steamSessionCookie = sessionCookie,
             steamSessionSteamId64 = sessionSteamId64,
-            steamSessionUserAgent = sessionUserAgent
+            steamSessionUserAgent = sessionUserAgent,
+            lastSteamSyncEpochSec = lastSteamSyncEpochSec
         )
     }
 
@@ -126,6 +131,17 @@ class WorkshopLocalStore(
             .apply()
     }
 
+    fun getLastSteamSyncEpochSec(userId: String): Long {
+        return prefs.getLong("${keyPrefix(userId)}last_steam_sync_epoch_sec", 0L).coerceAtLeast(0L)
+    }
+
+    fun saveLastSteamSyncEpochSec(userId: String, epochSec: Long) {
+        if (epochSec <= 0L) return
+        prefs.edit()
+            .putLong("${keyPrefix(userId)}last_steam_sync_epoch_sec", epochSec)
+            .apply()
+    }
+
     fun isGuestMode(): Boolean {
         return prefs.getBoolean(KEY_IS_GUEST_MODE, false)
     }
@@ -149,6 +165,9 @@ class WorkshopLocalStore(
         }
         if (userSnapshot.steamSessionCookie.isEmpty() && guestSnapshot.steamSessionCookie.isNotEmpty()) {
             saveSteamSession(newUserId, guestSnapshot.steamSessionSteamId64, guestSnapshot.steamSessionCookie, guestSnapshot.steamSessionUserAgent)
+        }
+        if (getLastSteamSyncEpochSec(newUserId) == 0L && guestSnapshot.lastSteamSyncEpochSec > 0L) {
+            saveLastSteamSyncEpochSec(newUserId, guestSnapshot.lastSteamSyncEpochSec)
         }
         if (getWorkshopLastVisitEpochSec(newUserId) == 0L) {
             val guestVisit = getWorkshopLastVisitEpochSec("guest")

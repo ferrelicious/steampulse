@@ -102,6 +102,7 @@ import com.example.data.WorkshopFollowRepository
 import com.example.data.WorkshopLocalStore
 import com.example.firebase.configureAppCheck
 import com.example.model.CurrencyMode
+import com.example.model.SteamSyncUiState
 import com.example.model.WorkshopSectionTab
 import com.example.notifications.WorkshopNotificationHelper
 import com.example.ui.components.AppUpdateDialog
@@ -518,6 +519,9 @@ private fun AuthenticatedAppShell(
                                 userEmail = userEmail,
                                 hasSteamSession = workshopState.hasSteamSession,
                                 steamSessionSteamId64 = workshopState.steamSessionSteamId64,
+                                syncedModsCount = workshopState.syncedModsCount,
+                                lastSteamSyncEpochSec = workshopState.lastSteamSyncEpochSec,
+                                isSteamSyncing = workshopState.steamSyncState is SteamSyncUiState.Syncing,
                                 isCheckingForUpdate = isCheckingAppUpdate,
                                 updateStatusMessage = appUpdateStatusMessage,
                                 latestGitHubVersion = appUpdateLatestTag,
@@ -545,6 +549,7 @@ private fun AuthenticatedAppShell(
                                     signOut(credentialManager, scope)
                                 },
                                 onConnectSteamSession = workshopViewModel::openSteamWebViewLoginDialog,
+                                onSyncSteamNow = workshopViewModel::syncSteamSubscriptions,
                                 onClearSteamSession = workshopViewModel::logoutSteamSession,
                                 onSetNotificationsEnabled = workshopViewModel::setNewModNotificationsEnabled,
                                 onSelectCheckIntervalHours = workshopViewModel::selectCheckIntervalHours,
@@ -654,8 +659,8 @@ private fun AuthenticatedAppShell(
 
                                 AppTab.WATCHLIST -> WatchlistScreen(
                                     watchlistState = watchlistState,
-                                    games = remember(uiState.games, uiState.knownGames) {
-                                        (uiState.games + uiState.knownGames).distinctBy { it.id }
+                                    games = remember(uiState.games, uiState.saleDeals, uiState.knownGames) {
+                                        (uiState.games + uiState.saleDeals + uiState.knownGames).distinctBy { it.id }
                                     },
                                     currency = uiState.currency,
                                     onOpenGame = { gameId ->
@@ -674,8 +679,8 @@ private fun AuthenticatedAppShell(
 
                                 AppTab.IMAGE_STUDIO -> PulseCardStudioScreen(
                                     viewModel = pulseCardStudioViewModel,
-                                    pulsGames = remember(uiState.games, uiState.knownGames) {
-                                        (uiState.games + uiState.knownGames).distinctBy { it.id }
+                                    pulsGames = remember(uiState.games, uiState.saleDeals, uiState.knownGames) {
+                                        (uiState.games + uiState.saleDeals + uiState.knownGames).distinctBy { it.id }
                                     },
                                     followedGames = workshopState.followedGames,
                                     followedMods = workshopState.followedMods,

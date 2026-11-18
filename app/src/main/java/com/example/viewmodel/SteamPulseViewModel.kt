@@ -50,6 +50,8 @@ data class SteamPulseUiState(
     val isLoadingCategory: Boolean = false,
     val categoryError: String? = null,
     val games: List<SteamGame> = emptyList(),
+    val saleDeals: List<SteamGame> = emptyList(),
+    val isLoadingSales: Boolean = false,
     val knownGames: List<SteamGame> = emptyList(),
     val selectedGameId: String? = null,
     val selectedEdition: GameEdition = GameEdition.STANDARD
@@ -59,6 +61,7 @@ data class SteamPulseUiState(
 
     val selectedGame: SteamGame?
         get() = games.firstOrNull { it.id == selectedGameId }
+            ?: saleDeals.firstOrNull { it.id == selectedGameId }
             ?: knownGames.firstOrNull { it.id == selectedGameId }
 }
 
@@ -80,6 +83,8 @@ class SteamPulseViewModel(
     private val _isLoadingCategory = MutableStateFlow(false)
     private val _categoryError = MutableStateFlow<String?>(null)
     private val _categoryGames = MutableStateFlow<List<SteamGame>>(emptyList())
+    private val _saleDeals = MutableStateFlow<List<SteamGame>>(emptyList())
+    private val _isLoadingSales = MutableStateFlow(false)
     private val _knownGamesMap = MutableStateFlow<Map<Int, SteamGame>>(emptyMap())
 
     private val _selectedGameId = MutableStateFlow<String?>(null)
@@ -93,6 +98,7 @@ class SteamPulseViewModel(
     private var searchJob: Job? = null
     private var categoryJob: Job? = null
     private var enrichJob: Job? = null
+    private var salesJob: Job? = null
 
     val watchlistState: StateFlow<WatchlistUiState> = if (currentUserId == "guest") {
         _localWatchlist
@@ -179,13 +185,34 @@ class SteamPulseViewModel(
         SelectionSnapshot(gameId, edition, currency, knownMap)
     }
 
+    private val salesFlow = combine(
+        _saleDeals,
+        _isLoadingSales
+    ) { deals, loading ->
+        deals to loading
+    }
+
     val uiState: StateFlow<SteamPulseUiState> = combine(
         searchStateFlow,
         categoryStateFlow,
-        selectionFlow
-    ) { search, category, selection ->
-        val isSearchActive = search.query.trim().length >= 2
-        val baseList = if (isSearchActive) search.results else category.games
+        selectionFlow,
+        salesFlow
+    ) { search, category, selection, salesPair ->
+        val trimmedQuery = search.query.trim()
+        val isSearchActive = trimmedQuery.length >= 2
+
+        val baseList = if (isSearchActive) {
+            val localPool = (category.games + selection.knownMap.values + SteamGamesCatalog.initialGames)
+                .distinctBy { it.appId }
+            val localMatches = localPool.filter { game ->
+                game.title.contains(trimmedQuery, ignoreCase = true) ||
+                    game.developer.contains(trimmedQuery, ignoreCase = true) ||
+                    game.appId.toString() == trimmedQuery
+            }
+            (search.results + localMatches).distinctBy { it.appId }
+        } else {
+            category.games
+        }
 
         val sortedList = when (category.sort) {
             SortOrder.DEFAULT -> baseList
@@ -206,6 +233,8 @@ class SteamPulseViewModel(
             isLoadingCategory = category.isLoading,
             categoryError = category.error,
             games = sortedList,
+            saleDeals = salesPair.first,
+            isLoadingSales = salesPair.second,
             knownGames = selection.knownMap.values.toList(),
             selectedGameId = selection.gameId,
             selectedEdition = selection.edition
@@ -218,7 +247,46 @@ class SteamPulseViewModel(
 
     init {
         loadCategory(GameCategory.MOST_PLAYED)
+        loadSteamSpecials()
         hydrateWatchedGamesMetadata()
+    }
+
+    private fun loadSteamSpecials(forceRefresh: Boolean = false) {
+        salesJob?.cancel()
+        salesJob = viewModelScope.launch {
+            _isLoadingSales.value = true
+            runCatching {
+                pulseRepository.fetchSteamSpecials(forceRefresh)
+            }.onSuccess { specials ->
+                val resolved = if (specials.isNotEmpty()) {
+                    specials
+                } else {
+                    SteamGamesCatalog.initialGames
+                        .filter { SteamGamesCatalog.getDiscountPercent(it) > 0 }
+                        .sortedByDescending { SteamGamesCatalog.getDiscountPercent(it) }
+                }
+                _saleDeals.value = resolved
+                _isLoadingSales.value = false
+                registerKnownGames(resolved)
+
+                if (specials.isNotEmpty()) {
+                    val enriched = runCatching {
+                        pulseRepository.enrichGames(specials, limit = 8, concurrency = 4)
+                    }.getOrNull()
+                    if (!enriched.isNullOrEmpty()) {
+                        _saleDeals.value = enriched
+                        registerKnownGames(enriched)
+                    }
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                val fallback = SteamGamesCatalog.initialGames
+                    .filter { SteamGamesCatalog.getDiscountPercent(it) > 0 }
+                    .sortedByDescending { SteamGamesCatalog.getDiscountPercent(it) }
+                _saleDeals.value = _saleDeals.value.ifEmpty { fallback }
+                _isLoadingSales.value = false
+            }
+        }
     }
 
     private fun hydrateWatchedGamesMetadata() {
@@ -339,6 +407,7 @@ class SteamPulseViewModel(
 
     fun refreshActiveList() {
         val trimmed = _searchQuery.value.trim()
+        loadSteamSpecials(forceRefresh = true)
         if (trimmed.length >= 2) {
             updateSearchQuery(_searchQuery.value)
         } else {

@@ -38,6 +38,8 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPasteGo
 import androidx.compose.material.icons.rounded.CurrencyExchange
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -106,6 +109,9 @@ import com.example.ui.theme.SteamNeon
 import com.example.ui.theme.SteamSurface
 import com.example.ui.theme.SteamTextPrimary
 import com.example.ui.theme.SteamTextSecondary
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalCoilApi::class)
 @Composable
@@ -115,6 +121,9 @@ fun SettingsScreen(
     userEmail: String?,
     hasSteamSession: Boolean,
     steamSessionSteamId64: String,
+    syncedModsCount: Int = 0,
+    lastSteamSyncEpochSec: Long = 0L,
+    isSteamSyncing: Boolean = false,
     isCheckingForUpdate: Boolean,
     updateStatusMessage: String?,
     latestGitHubVersion: String? = null,
@@ -133,6 +142,7 @@ fun SettingsScreen(
     onNavigateToLogin: () -> Unit,
     onSignOut: () -> Unit,
     onConnectSteamSession: () -> Unit,
+    onSyncSteamNow: () -> Unit = {},
     onClearSteamSession: () -> Unit,
     onSetNotificationsEnabled: (Boolean) -> Unit,
     onSelectCheckIntervalHours: (Long) -> Unit,
@@ -409,27 +419,141 @@ fun SettingsScreen(
 
             HorizontalDivider(color = SteamBorder)
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Surface(
+                color = SteamBg,
+                border = BorderStroke(
+                    1.dp,
+                    if (hasSteamSession) SteamNeon.copy(alpha = 0.45f) else SteamBorder
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (hasSteamSession) "Ansluten till Steam" else "Ej ansluten",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (hasSteamSession) SteamNeon else SteamTextPrimary,
-                        modifier = Modifier.testTag("settings_steam_status")
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (hasSteamSession) Icons.Rounded.CloudDone else Icons.Rounded.CloudOff,
+                            contentDescription = null,
+                            tint = if (hasSteamSession) SteamNeon else SteamTextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (hasSteamSession) "Ansluten till Steam" else "Ej ansluten till Steam",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (hasSteamSession) SteamNeon else SteamTextPrimary,
+                                modifier = Modifier.testTag("settings_steam_status")
+                            )
+                            Text(
+                                text = if (hasSteamSession) {
+                                    "SteamID64: ${steamSessionSteamId64.ifBlank { "Aktiv session" }}"
+                                } else {
+                                    "Logga in via Steam WebView för att synka privata prenumerationer"
+                                },
+                                fontFamily = if (hasSteamSession) JetBrainsMonoFontFamily else MaterialTheme.typography.labelSmall.fontFamily,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (hasSteamSession) SteamAccent else SteamTextSecondary,
+                                modifier = Modifier.testTag("settings_steam_id_text")
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = SteamSurface,
+                            border = BorderStroke(1.dp, SteamBorder),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Synkade moddar",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = SteamTextSecondary
+                                )
+                                Text(
+                                    text = "$syncedModsCount moddar",
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = SteamTextPrimary,
+                                    modifier = Modifier.testTag("settings_steam_synced_count")
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = SteamSurface,
+                            border = BorderStroke(1.dp, SteamBorder),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Senaste synk",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = SteamTextSecondary
+                                )
+                                Text(
+                                    text = formatSteamSyncRelativeTime(lastSteamSyncEpochSec),
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (lastSteamSyncEpochSec > 0L) SteamNeon else SteamTextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.testTag("settings_steam_last_sync")
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = onSyncSteamNow,
+                enabled = !isSteamSyncing,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = SteamNeon,
+                    contentColor = Color(0xFF020617)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .minimumInteractiveComponentSize()
+                    .testTag("settings_steam_sync_now_button")
+            ) {
+                if (isSteamSyncing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color(0xFF020617)
                     )
-                    Text(
-                        text = if (hasSteamSession) {
-                            "SteamID64: ${steamSessionSteamId64.ifBlank { "Aktiv session" }}"
-                        } else {
-                            "Logga in via Steam WebView för att synka privata prenumerationer"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SteamTextSecondary
+                    Spacer(Modifier.width(8.dp))
+                    Text("Synkar moddar...", fontWeight = FontWeight.ExtraBold)
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.Sync,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp)
                     )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Synka nu", fontWeight = FontWeight.ExtraBold)
                 }
             }
 
@@ -1071,4 +1195,21 @@ private fun SettingsSwitchRow(
 private fun formatHourLabel(hour: Int): String {
     val safe = hour.coerceIn(0, 23)
     return if (safe < 10) "0$safe:00" else "$safe:00"
+}
+
+internal fun formatSteamSyncRelativeTime(
+    epochSec: Long,
+    nowEpochSec: Long = System.currentTimeMillis() / 1000L
+): String {
+    if (epochSec <= 0L) return "Aldrig synkad"
+    val diff = (nowEpochSec - epochSec).coerceAtLeast(0L)
+    return when {
+        diff < 60L -> "Just nu"
+        diff < 3600L -> "${diff / 60L} min sedan"
+        diff < 86400L -> "${diff / 3600L} tim sedan"
+        else -> {
+            val formatter = SimpleDateFormat("d MMM HH:mm", Locale.forLanguageTag("sv-SE"))
+            formatter.format(Date(epochSec * 1000L))
+        }
+    }
 }
